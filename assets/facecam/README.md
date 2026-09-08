@@ -16,8 +16,11 @@ Real files are gitignored — only this README and `.gitkeep` are tracked.
   there is plenty of headroom for downscaling, and none for upscaling.
 - **Plain, contrasting background.** The bubble sits over a busy website
   screenshot; a cluttered background turns to mush at GIF palette sizes.
-- **Loopable.** Clips shorter than `--duration` are looped automatically, so a
-  clip that starts and ends in a similar pose loops without a visible jump.
+- **Light on your face beats a bright room.** Exposure is corrected
+  automatically, but gamma lifts noise along with the shadows — a clip lit from
+  the front needs almost no correction and stays cleaner.
+- **Loopable.** The clip's own length sets the video length, so the GIF loops on
+  a whole sentence. Start and end in a similar pose and the loop is invisible.
 - **Motion in the first second.** Outlook shows only frame one of a GIF, and
   Gmail's preview is short — a wave or a smile early does the work.
 

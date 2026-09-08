@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
 
+from . import exposure
 from .config import RenderConfig
 from .overlays import circle_mask, ring_overlay
 
@@ -83,6 +84,24 @@ def has_audio(path: Path) -> bool:
     return any(s.get("codec_type") == "audio" for s in probe(path).get("streams", []))
 
 
+def resolve_duration(facecam: Path, cfg: RenderConfig) -> float:
+    """How long the clip runs.
+
+    Defaults to the face cam take itself (minus any `--facecam-start` trim), so
+    the video ends where Sam stops talking and the GIF loops on a whole sentence
+    instead of cutting mid-word. An explicit --duration wins.
+    """
+    if cfg.duration:
+        return max(float(cfg.duration), 0.1)
+    clip = exposure.duration_of(facecam)
+    if not clip:
+        log.warning("Could not read the face cam duration — falling back to 6s")
+        return 6.0
+    duration = round(max(clip - cfg.facecam_start, 0.5), 3)
+    log.info("Duration bound to %s: %.2fs", facecam.name, duration)
+    return duration
+
+
 @dataclass
 class RenderResult:
     webm: Optional[Path]
@@ -91,13 +110,18 @@ class RenderResult:
     gif: Optional[Path] = None
 
 
-def build_filtergraph(cfg: RenderConfig, with_navbar: bool = False) -> str:
+def build_filtergraph(
+    cfg: RenderConfig,
+    with_navbar: bool = False,
+    duration: Optional[float] = None,
+    facecam_eq: str = "",
+) -> str:
     """Screenshot scrolls with an ease-in-out; the site's sticky nav (if we lifted
     one) stays pinned at the top; face cam is cropped square, made circular via
     alphamerge, then the ring is laid over the seam."""
     w, h, d = cfg.width, cfg.height, cfg.facecam_diameter
     margin = cfg.facecam_margin
-    duration = max(cfg.duration, 0.1)
+    duration = max(duration if duration is not None else (cfg.duration or 6.0), 0.1)
 
     bubble_x = margin
     bubble_y = h - d - margin
@@ -105,6 +129,7 @@ def build_filtergraph(cfg: RenderConfig, with_navbar: bool = False) -> str:
     ring_y = bubble_y - SHADOW_PAD
 
     # smoothstep(p) = p^2 * (3 - 2p), with p clamped to [0,1]
+    eq = f"{facecam_eq}," if facecam_eq else ""
     p = f"min(t/{duration},1)"
     travel = f"(ih-oh)*{cfg.scroll_ratio}"
     scroll_y = f"'{travel}*({p}*{p}*(3-2*{p}))'"
@@ -117,7 +142,7 @@ def build_filtergraph(cfg: RenderConfig, with_navbar: bool = False) -> str:
         f"[bgpad]crop={w}:{h}:0:{scroll_y}[bg];"
         # Face cam: cover-crop to a square, resize to bubble, force constant fps.
         f"[1:v]fps={cfg.fps},scale={d}:{d}:force_original_aspect_ratio=increase:flags=lanczos,"
-        f"crop={d}:{d},setsar=1,format=rgba[fcraw];"
+        f"crop={d}:{d},setsar=1,{eq}format=rgba[fcraw];"
         f"[fcraw][2:v]alphamerge[fc];"
         f"[bg][fc]overlay={bubble_x}:{bubble_y}:format=auto[withcam];"
         f"[withcam][3:v]overlay={ring_x}:{ring_y}:format=auto[withring];"
@@ -164,15 +189,25 @@ def render(
         shadow_px=SHADOW_PAD,
     )
 
+    duration = resolve_duration(facecam, cfg)
+    facecam_eq = exposure.eq_filter(
+        facecam,
+        auto=cfg.facecam_auto_exposure,
+        target_luma=cfg.facecam_target_luma,
+        gamma=cfg.facecam_gamma,
+        brightness=cfg.facecam_brightness,
+        contrast=cfg.facecam_contrast,
+        saturation=cfg.facecam_saturation,
+    )
     with_navbar = navbar is not None and navbar.exists()
-    graph = build_filtergraph(cfg, with_navbar=with_navbar)
+    graph = build_filtergraph(cfg, with_navbar=with_navbar, duration=duration, facecam_eq=facecam_eq)
     audio = keep_audio and has_audio(facecam)
 
     def inputs() -> List[str]:
         return [
-            "-loop", "1", "-framerate", str(cfg.fps), "-t", f"{cfg.duration}", "-i", str(screenshot),
+            "-loop", "1", "-framerate", str(cfg.fps), "-t", f"{duration}", "-i", str(screenshot),
             # Loop the clip if it is shorter than the target duration.
-            "-stream_loop", "-1", "-ss", f"{cfg.facecam_start}", "-t", f"{cfg.duration}", "-i", str(facecam),
+            "-stream_loop", "-1", "-ss", f"{cfg.facecam_start}", "-t", f"{duration}", "-i", str(facecam),
             "-i", str(mask),
             "-i", str(ring),
         ] + (["-i", str(navbar)] if with_navbar else [])
@@ -181,7 +216,7 @@ def render(
         cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", *inputs(),
                "-filter_complex", graph, "-map", "[v]"]
         cmd += (["-map", "1:a:0", *audio_args] if audio and audio_args else ["-an"])
-        cmd += [*video_args, "-t", f"{cfg.duration}", str(dest)]
+        cmd += [*video_args, "-t", f"{duration}", str(dest)]
         _run(cmd)
         return dest
 
@@ -224,21 +259,54 @@ def render(
 # GIF                                                                          #
 # --------------------------------------------------------------------------- #
 
+# GIF frame delays are stored in centiseconds, so only frame rates that divide
+# 100 exactly can produce a clip of exactly N seconds. 12fps means an 8.33cs
+# delay, which rounds to 8 and quietly runs the GIF 4% fast.
+_EXACT_FPS = (25, 20, 10, 5, 4, 2)
+
+
+def snap_fps(value: int) -> int:
+    """Largest exact-timing frame rate at or below `value`."""
+    for fps in _EXACT_FPS:
+        if fps <= value:
+            return fps
+    return _EXACT_FPS[-1]
+
+
+def step_fps(fps: int, steps: int) -> int:
+    """Move `steps` rungs down the exact-timing frame rates."""
+    index = _EXACT_FPS.index(snap_fps(fps))
+    return _EXACT_FPS[min(index + steps, len(_EXACT_FPS) - 1)]
+
+
 # Outlook and Gmail both get unhappy with heavy GIFs, so we walk down this ladder
-# of (width multiplier, fps multiplier, palette colours) until the file fits.
+# of (width multiplier, frame-rate steps down, palette colours) until it fits.
 #
 # Width is given up last and deliberately. The email tag declares width="600",
 # so a narrower GIF gets upscaled by the client and looks soft — whereas a slow
-# page scroll survives 8fps and a small palette almost unnoticed.
+# page scroll survives a small palette almost unnoticed.
 _GIF_LADDER = [
-    (1.00, 1.00, 256),
-    (1.00, 0.83, 192),
-    (1.00, 0.66, 128),
-    (1.00, 0.50, 96),
-    (1.00, 0.50, 64),
-    (0.85, 0.50, 64),
-    (0.70, 0.50, 64),
+    (1.00, 0, 256),
+    (1.00, 0, 192),
+    (1.00, 0, 128),
+    (1.00, 0, 96),
+    (1.00, 0, 64),
+    (1.00, 1, 64),
+    (0.85, 1, 64),
+    (0.70, 1, 48),
 ]
+
+
+def gif_duration(path: Path) -> float:
+    """Actual playback length of a GIF, summing its per-frame delays."""
+    from PIL import Image  # noqa: WPS433
+
+    total = 0.0
+    with Image.open(path) as img:
+        for index in range(getattr(img, "n_frames", 1)):
+            img.seek(index)
+            total += img.info.get("duration", 0) / 1000.0
+    return round(total, 3)
 
 
 def to_gif(source: Path, dest: Path, cfg: RenderConfig, max_bytes: Optional[int] = None) -> Path:
@@ -247,10 +315,14 @@ def to_gif(source: Path, dest: Path, cfg: RenderConfig, max_bytes: Optional[int]
     budget = max_bytes if max_bytes is not None else cfg.gif_max_bytes
     dest.parent.mkdir(parents=True, exist_ok=True)
 
+    base_fps = snap_fps(cfg.gif_fps)
+    if base_fps != cfg.gif_fps:
+        log.info("GIF frame rate snapped %d -> %d fps for exact centisecond timing", cfg.gif_fps, base_fps)
+
     last_size = None
-    for width_mult, fps_mult, colors in _GIF_LADDER:
+    for width_mult, fps_steps, colors in _GIF_LADDER:
         width = max(int(cfg.gif_width * width_mult) // 2 * 2, 240)
-        fps = max(int(round(cfg.gif_fps * fps_mult)), 6)
+        fps = step_fps(base_fps, fps_steps)
 
         with tempfile.TemporaryDirectory() as tmp:
             palette = Path(tmp) / "palette.png"
@@ -262,7 +334,10 @@ def to_gif(source: Path, dest: Path, cfg: RenderConfig, max_bytes: Optional[int]
                   "-loop", "0", str(dest)])
 
         last_size = dest.stat().st_size
-        log.info("GIF %dpx @%dfps / %d colours -> %.2f MB", width, fps, colors, last_size / 1e6)
+        log.info(
+            "GIF %dpx @%dfps / %d colours -> %.2f MB, %.2fs",
+            width, fps, colors, last_size / 1e6, gif_duration(dest),
+        )
         if last_size <= budget:
             return dest
 

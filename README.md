@@ -48,7 +48,7 @@ loomgif batch --input examples/prospects.csv
 Run any of them with `--help` for the full flag list. The useful render flags:
 
 ```bash
---duration 6          # clip length in seconds
+--duration 5          # override; by default it matches the face cam clip
 --facecam-start 2.5   # skip a slate at the head of the footage
 --facecam path.mp4    # a specific take, or a directory to rotate between
 --no-pin-nav          # let the site header scroll away instead of pinning it
@@ -211,13 +211,56 @@ emailed.
 loomgif doctor        # lists the takes it can see
 ```
 
+### Length
+
+By default the clip runs **exactly as long as the face cam take** (minus any
+`--facecam-start` trim). Sam's clips are 5s, so the video and the GIF are 5.000s
+— the video ends where he stops talking, and the GIF loops on a whole sentence
+instead of cutting mid-word. `--duration` overrides it.
+
+GIF frame delays are stored in centiseconds, so only frame rates that divide 100
+exactly can hit a whole number of seconds. 12fps means an 8.33cs delay that
+rounds to 8 and quietly runs the GIF 4% fast. Rates are therefore snapped to
+25 / 20 / 10 / 5, and the encoder logs the duration it actually produced:
+
+```
+Duration bound to sam-facecam-1.mp4: 5.00s
+GIF 600px @10fps / 256 colours -> 1.68 MB, 5.00s
+```
+
+### Face cam exposure
+
+Webcam takes vary a lot — Sam's two clips measure 129 and 88 mean luma, a 40-point
+gap — so a fixed brightness bump would blow out one and leave the other dark.
+
+Each clip is instead **measured once** (a few sampled frames of the square centre
+crop, cached per file) and given the gamma that lifts it to `FACECAM_TARGET_LUMA`.
+Dark takes get rescued; bright ones are left alone, since the correction is
+clamped to never darken.
+
+```
+sam-facecam-1.mp4 mean luma 129.0/255 -> gamma 1.11
+sam-facecam-2.mp4 mean luma  88.4/255 -> gamma 1.73
+```
+
+The target sits high (138) on purpose: dark clothing drags the square crop's
+average well below the face's own brightness, and the bubble renders small enough
+that an under-lit face just reads as murk.
+
+Set `FACECAM_GAMMA` to a number to skip the measurement, or
+`FACECAM_AUTO_EXPOSURE=0` to turn it off. `FACECAM_BRIGHTNESS`,
+`FACECAM_CONTRAST` and `FACECAM_SATURATION` are applied on top.
+
 ### GIF sizing
 
 Email clients choke well before the nominal limits, so `to_gif` walks a ladder of
-width / frame rate / palette size until the file fits `--max-mb` (default 1.8MB),
-using two-pass `palettegen`/`paletteuse` with `stats_mode=diff`. It logs what it
-settled on. If it exhausts the ladder it warns rather than shipping something
-huge — shorten `--duration`, which is the biggest lever by far.
+palette size, then frame rate, then width until the file fits `--max-mb`
+(default 1.8MB), using two-pass `palettegen`/`paletteuse` with `stats_mode=diff`.
+Width goes last, because the `<img>` tag declares `width="600"` and a narrower
+GIF gets upscaled by the client and looks soft.
+
+If it exhausts the ladder it warns rather than shipping something huge — shorten
+`--duration`, which is the biggest lever by far.
 
 **Outlook 2007–2019 shows only frame one.** Frame one has to make sense on its
 own, so record footage with a wave or a smile early.

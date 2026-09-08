@@ -192,3 +192,89 @@ class TestFacecamRotation(unittest.TestCase):
         from loomgif import facecam
 
         self.assertIsNone(facecam.pick(Path("/nope/missing"), "x"))
+
+
+class TestExactGifTiming(unittest.TestCase):
+    """GIF delays live in centiseconds, so only frame rates dividing 100 give
+    an exact duration. 12fps means an 8.33cs delay that rounds to 8, running
+    the GIF ~4% fast — a 5s clip lands at 4.8s."""
+
+    def test_snap_picks_the_nearest_exact_rate_at_or_below(self):
+        from loomgif.compose import snap_fps
+
+        self.assertEqual(snap_fps(12), 10)
+        self.assertEqual(snap_fps(24), 20)
+        self.assertEqual(snap_fps(10), 10)
+        self.assertEqual(snap_fps(1), 2)
+
+    def test_every_ladder_rate_divides_100_exactly(self):
+        from loomgif.compose import _GIF_LADDER, step_fps
+
+        for _, steps, _ in _GIF_LADDER:
+            for start in (25, 20, 10):
+                fps = step_fps(start, steps)
+                self.assertEqual(100 % fps, 0, f"{fps}fps cannot produce exact timing")
+
+    def test_ladder_never_widens_or_speeds_up(self):
+        from loomgif.compose import _GIF_LADDER
+
+        widths = [rung[0] for rung in _GIF_LADDER]
+        steps = [rung[1] for rung in _GIF_LADDER]
+        self.assertEqual(widths, sorted(widths, reverse=True))
+        self.assertEqual(steps, sorted(steps))
+
+
+class TestDurationBinding(unittest.TestCase):
+    def test_explicit_duration_wins(self):
+        from loomgif.compose import resolve_duration
+
+        cfg = RenderConfig()
+        cfg.duration = 3.5
+        self.assertEqual(resolve_duration(Path("/nonexistent.mp4"), cfg), 3.5)
+
+    def test_falls_back_when_the_clip_cannot_be_read(self):
+        from loomgif.compose import resolve_duration
+
+        cfg = RenderConfig()
+        cfg.duration = None
+        self.assertEqual(resolve_duration(Path("/nonexistent.mp4"), cfg), 6.0)
+
+
+class TestAutoExposure(unittest.TestCase):
+    def test_gamma_brightens_dark_and_leaves_bright_alone(self):
+        from loomgif import exposure
+
+        # Solve the same relation gamma_for uses, without touching ffmpeg.
+        import math
+
+        def gamma(measured, target):
+            raw = math.log(measured / 255.0) / math.log(target / 255.0)
+            return max(exposure.GAMMA_MIN, min(exposure.GAMMA_MAX, raw))
+
+        self.assertGreater(gamma(88.4, 138), 1.5)   # the dark take gets lifted
+        self.assertAlmostEqual(gamma(138, 138), 1.0, places=6)  # on target = untouched
+        self.assertEqual(gamma(200, 138), 1.0)      # already bright is never darkened
+
+    def test_eq_filter_is_empty_when_nothing_to_do(self):
+        from loomgif import exposure
+
+        self.assertEqual(
+            exposure.eq_filter(Path("/x.mp4"), auto=False, target_luma=138, gamma=1.0,
+                               brightness=0.0, contrast=1.0, saturation=1.0),
+            "",
+        )
+
+    def test_eq_filter_composes_only_active_terms(self):
+        from loomgif import exposure
+
+        built = exposure.eq_filter(Path("/x.mp4"), auto=False, target_luma=138, gamma=1.5,
+                                   brightness=0.0, contrast=1.06, saturation=1.0)
+        self.assertIn("gamma=1.500", built)
+        self.assertIn("contrast=1.060", built)
+        self.assertNotIn("brightness", built)
+        self.assertNotIn("saturation", built)
+
+    def test_correction_is_applied_to_the_facecam_stream_only(self):
+        graph = build_filtergraph(RenderConfig(), facecam_eq="eq=gamma=1.500")
+        self.assertIn("eq=gamma=1.500,format=rgba[fcraw]", graph)
+        self.assertEqual(graph.count("eq=gamma"), 1)

@@ -24,6 +24,17 @@ def _float(name: str, default: float) -> float:
     return float(raw) if raw not in (None, "") else default
 
 
+def _opt_float(name: str) -> Optional[float]:
+    """None means 'auto' — DURATION=auto, or simply unset."""
+    raw = (os.getenv(name) or "").strip().lower()
+    if raw in ("", "auto", "0", "none"):
+        return None
+    try:
+        return float(raw)
+    except ValueError:
+        return None
+
+
 class ConfigError(RuntimeError):
     """Raised when required credentials are missing."""
 
@@ -76,7 +87,9 @@ class RenderConfig:
 
     canvas_width: int = field(default_factory=lambda: _int("CANVAS_WIDTH", 1280))
     canvas_height: int = field(default_factory=lambda: _int("CANVAS_HEIGHT", 720))
-    duration: float = field(default_factory=lambda: _float("DURATION", 6.0))
+    # None = match the face cam clip exactly, so the video ends where Sam does
+    # and the GIF loops on a whole sentence rather than mid-word.
+    duration: Optional[float] = field(default_factory=lambda: _opt_float("DURATION"))
     fps: int = field(default_factory=lambda: _int("FPS", 24))
 
     # Face cam bubble, expressed as a fraction of canvas height so it scales cleanly.
@@ -86,6 +99,20 @@ class RenderConfig:
     facecam_ring_color: str = field(default_factory=lambda: os.getenv("FACECAM_RING_COLOR", "#FFFFFF"))
     # Seconds into the source footage to start using (lets you skip a slate/countdown).
     facecam_start: float = field(default_factory=lambda: _float("FACECAM_START", 0.0))
+
+    # Auto-exposure. Webcam takes vary widely, so each clip is measured once and
+    # lifted to `facecam_target_luma`. The target sits high because dark clothing
+    # drags the square crop's average well below the face's own brightness, and
+    # the bubble renders small enough that an under-lit face just reads as murk.
+    # Setting FACECAM_GAMMA disables the measurement and applies that value.
+    facecam_auto_exposure: bool = field(
+        default_factory=lambda: os.getenv("FACECAM_AUTO_EXPOSURE", "1") not in ("0", "false", "False")
+    )
+    facecam_target_luma: float = field(default_factory=lambda: _float("FACECAM_TARGET_LUMA", 138.0))
+    facecam_gamma: Optional[float] = field(default_factory=lambda: _opt_float("FACECAM_GAMMA"))
+    facecam_brightness: float = field(default_factory=lambda: _float("FACECAM_BRIGHTNESS", 0.02))
+    facecam_contrast: float = field(default_factory=lambda: _float("FACECAM_CONTRAST", 1.06))
+    facecam_saturation: float = field(default_factory=lambda: _float("FACECAM_SATURATION", 1.10))
 
     # How far down the captured page the scroll travels, as a fraction. Lower is
     # calmer, more readable, and compresses to a much smaller GIF.
@@ -108,7 +135,7 @@ class RenderConfig:
     # GIF budget. Email clients choke well before this, so we ladder down to fit.
     gif_max_bytes: int = field(default_factory=lambda: _int("GIF_MAX_BYTES", 1_800_000))
     gif_width: int = field(default_factory=lambda: _int("GIF_WIDTH", 600))
-    gif_fps: int = field(default_factory=lambda: _int("GIF_FPS", 12))
+    gif_fps: int = field(default_factory=lambda: _int("GIF_FPS", 10))
 
     @property
     def width(self) -> int:
