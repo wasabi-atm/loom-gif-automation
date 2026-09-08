@@ -259,7 +259,10 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     clips = facecam.takes(settings.facecam_path)
     print(f"  {'OK ' if clips else 'MISSING'}  face cam  {settings.facecam_path}")
     for clip in clips:
-        print(f"           - {clip.name}")
+        size_mb = clip.stat().st_size / 1e6
+        # GitHub warns above 50MB per file and refuses above 100MB.
+        flag = "  << too big for git, use LFS" if size_mb > 50 else ""
+        print(f"           - {clip.name}  ({size_mb:.1f} MB){flag}")
     if not clips:
         print("           Drop a clip there, or pass --facecam /path/to/clip.mp4")
     elif len(clips) > 1:

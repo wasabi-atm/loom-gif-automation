@@ -494,3 +494,48 @@ class TestContentCacheKey(unittest.TestCase):
             key = content_key(path)
             self.assertEqual(len(key), 12)
             self.assertTrue(key.isalnum())
+
+
+class TestRotationStability(unittest.TestCase):
+    """Adding a take must not reshuffle prospects who already have one.
+
+    `index = hash(key) % len(clips)` reassigns most of the list when a clip is
+    added. Rendezvous hashing moves only the share belonging to the new clip.
+    """
+
+    def _dir(self, tmp, names):
+        for name in names:
+            (tmp / name).write_bytes(b"x")
+        return tmp
+
+    def test_adding_a_take_leaves_most_assignments_alone(self):
+        from loomgif import facecam
+
+        slugs = [f"prospect-{i}-com" for i in range(60)]
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = self._dir(Path(raw), ["a.mp4", "b.mp4"])
+            before = {s: facecam.pick(tmp, s).name for s in slugs}
+            (tmp / "c.mp4").write_bytes(b"x")
+            after = {s: facecam.pick(tmp, s).name for s in slugs}
+
+            moved = sum(1 for s in slugs if before[s] != after[s])
+            self.assertLess(moved, len(slugs) * 0.45)          # modulo would move ~2/3
+            self.assertTrue(all(after[s] == "c.mp4" for s in slugs if before[s] != after[s]))
+
+    def test_all_takes_get_used(self):
+        from loomgif import facecam
+
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = self._dir(Path(raw), ["a.mp4", "b.mp4", "c.mp4"])
+            chosen = {facecam.pick(tmp, f"p-{i}").name for i in range(60)}
+            self.assertEqual(chosen, {"a.mp4", "b.mp4", "c.mp4"})
+
+    def test_subfolders_are_searched(self):
+        from loomgif import facecam
+
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            (tmp / "2026-09").mkdir()
+            (tmp / "2026-09" / "shoot.mp4").write_bytes(b"x")
+            (tmp / "notes.md").write_bytes(b"ignored")
+            self.assertEqual([p.name for p in facecam.takes(tmp)], ["shoot.mp4"])

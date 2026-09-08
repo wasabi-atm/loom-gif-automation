@@ -5,7 +5,17 @@ every clip in it joins the rotation: each prospect is assigned one
 deterministically from a hash of their domain, giving a list variety while a
 re-run never swaps media that has already gone out.
 
-Real files are gitignored — only this README and `.gitkeep` are tracked.
+**Clips are committed to the repo**, so the rotation travels with it and a fresh
+clone can render straight away. Just add a file and push — nothing else to
+change, the folder is read at runtime. Subfolders work too, so takes can be
+filed by shoot date.
+
+Keep individual files under ~50MB. GitHub warns above that and refuses above
+100MB; `loomgif doctor` flags any clip that is too big.
+
+Adding a take reassigns only the share of prospects that genuinely belongs to
+it — the rotation uses rendezvous hashing rather than a modulo, so everyone else
+keeps the clip they already had.
 
 ## What records well
 

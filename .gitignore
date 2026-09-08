@@ -17,10 +17,9 @@ output/
 .cache/
 *.log
 
-# Large source footage (keep the folder, not the files)
-assets/facecam/*
-!assets/facecam/.gitkeep
-!assets/facecam/README.md
+# Face cam takes ARE tracked, so the rotation travels with the repo and a clone
+# can render immediately. GitHub warns above 50MB per file and rejects above
+# 100MB — trim exports, or move to Git LFS if they get big.
 
 # macOS
 .DS_Store
