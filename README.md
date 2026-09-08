@@ -170,13 +170,20 @@ output/
 
 Masks are generated once at 4x and cached in `output/.overlays/`.
 
-The bubble is a **squircle** — a superellipse, `|x|^n + |y|^n = 1` at n=4.5.
-No ring, no drop shadow: the shape sits straight on the page the way a screen
-recorder's own bubble does. `FACECAM_SHAPE=circle` switches it back to a circle.
+The bubble is a **squircle** — a superellipse, `|x|^n + |y|^n = 1` at n=4.5 —
+with no ring and a soft drop shadow behind it, the way a screen recorder's own
+bubble looks. `FACECAM_SHAPE=circle` switches back to a circle.
 
-Worth knowing: with no border, a bright bubble on a white page has nothing
-separating it from the background. That is the cost of dropping the ring, and it
-shows most on light sites.
+The shadow is wide and faint rather than tight and dark, so it reads as depth
+instead of an outline, and it gives the bubble separation on white pages where a
+bare shape would otherwise dissolve into the background. All three parameters are
+fractions of the bubble size, so they scale with the canvas:
+
+| Variable | Default | Effect |
+|---|---|---|
+| `FACECAM_SHADOW_OPACITY` | `0.30` | `0` turns the shadow off entirely |
+| `FACECAM_SHADOW_BLUR_RATIO` | `0.085` | Softness; larger is more diffuse |
+| `FACECAM_SHADOW_OFFSET_RATIO` | `0.035` | How far it sits below the bubble |
 
 Geometry is env-tunable: `FACECAM_DIAMETER_RATIO` (0.32 of canvas height),
 `FACECAM_MARGIN_RATIO`, `FACECAM_SHAPE`, `SCROLL_RATIO`.
@@ -296,4 +303,15 @@ Everything is env-driven and `.env` is gitignored. **No key is ever committed.**
 | `INSTANTLY_API_KEY` | Only needed for `--push` |
 
 Uploads use `unique=False, overwrite=True`, so URLs stay stable per prospect and
-re-running refreshes the media without breaking already-sent emails.
+re-running refreshes the media without breaking already-sent emails. Verified
+against the live account: a repeat upload returns the same URL *and* the same
+file id, so it genuinely overwrites rather than creating a second file.
+
+The client adapts to whichever SDK generation is installed — 3.x/4.x take
+`public_key` and `url_endpoint` alongside the private key, 5.x takes the private
+key alone — and falls back to the documented REST endpoint if the SDK is absent
+or errors. Both paths are tested against the live account and return identical
+URLs.
+
+ImageKit re-optimises on delivery: a 1.70MB GIF was served at 1.10MB, and
+`?tr=w-400` (the `Gif small` variable) came back at 698KB without a re-encode.

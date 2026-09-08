@@ -303,3 +303,46 @@ class TestAutoExposure(unittest.TestCase):
         graph = build_filtergraph(RenderConfig(), facecam_eq="eq=gamma=1.500")
         self.assertIn("eq=gamma=1.500,format=rgba[fcraw]", graph)
         self.assertEqual(graph.count("eq=gamma"), 1)
+
+
+class TestBubbleShadow(unittest.TestCase):
+    def test_shadow_sits_behind_the_bubble(self):
+        cfg = RenderConfig()
+        graph = build_filtergraph(cfg, shadow_pad=46)
+        # Shadow is composited onto the background first, the face cam over it.
+        self.assertIn("[bg][3:v]overlay=", graph)
+        self.assertIn("[withshadow][fc]overlay=", graph)
+        self.assertLess(graph.index("withshadow"), graph.index("[withcam]"))
+
+    def test_navbar_input_shifts_when_a_shadow_is_present(self):
+        cfg = RenderConfig()
+        with_shadow = build_filtergraph(cfg, with_navbar=True, shadow_pad=46)
+        without = build_filtergraph(cfg, with_navbar=True, shadow_pad=None)
+        self.assertIn("[4:v]scale=", with_shadow)   # 3 is the shadow
+        self.assertIn("[3:v]scale=", without)       # no shadow, navbar moves up
+
+    def test_shadow_can_be_switched_off(self):
+        graph = build_filtergraph(RenderConfig(), shadow_pad=None)
+        self.assertNotIn("withshadow", graph)
+
+    def test_shadow_is_offset_padding_and_translucent(self):
+        from PIL import Image
+
+        from loomgif.overlays import shadow_overlay
+
+        with tempfile.TemporaryDirectory() as tmp:
+            dest, pad = shadow_overlay(160, Path(tmp) / "s.png", opacity=0.3, blur_px=14, offset_px=6)
+            self.assertEqual(pad, 14 * 2 + 6)
+            with Image.open(dest) as shadow:
+                self.assertEqual(shadow.size, (160 + pad * 2, 160 + pad * 2))
+                alpha = shadow.getchannel("A")
+                self.assertEqual(alpha.getpixel((0, 0)), 0)          # clear at the corner
+                centre = alpha.getpixel((shadow.width // 2, shadow.height // 2))
+                self.assertGreater(centre, 0)
+                self.assertLess(centre, 255)                          # never fully opaque
+
+    def test_shadow_geometry_scales_with_the_bubble(self):
+        cfg = RenderConfig()
+        self.assertGreater(cfg.facecam_shadow_blur, 0)
+        self.assertLess(cfg.facecam_shadow_blur, cfg.facecam_diameter // 2)
+        self.assertLess(cfg.facecam_shadow_offset, cfg.facecam_shadow_blur)

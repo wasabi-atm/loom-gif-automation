@@ -17,7 +17,7 @@ from typing import List, Optional
 
 from . import exposure
 from .config import RenderConfig
-from .overlays import facecam_mask
+from .overlays import facecam_mask, shadow_overlay
 
 log = logging.getLogger(__name__)
 
@@ -113,6 +113,7 @@ def build_filtergraph(
     with_navbar: bool = False,
     duration: Optional[float] = None,
     facecam_eq: str = "",
+    shadow_pad: Optional[int] = None,
 ) -> str:
     """Screenshot scrolls with an ease-in-out; the site's sticky nav (if we lifted
     one) stays pinned at the top; face cam is cropped square, made circular via
@@ -140,13 +141,26 @@ def build_filtergraph(
         f"[1:v]fps={cfg.fps},scale={d}:{d}:force_original_aspect_ratio=increase:flags=lanczos,"
         f"crop={d}:{d},setsar=1,{eq}format=rgba[fcraw];"
         f"[fcraw][2:v]alphamerge[fc];"
-        f"[bg][fc]overlay={bubble_x}:{bubble_y}:format=auto[withcam];"
     )
+
+    # Inputs: 0 screenshot, 1 face cam, 2 mask, then shadow and navbar if present.
+    next_input = 3
+    if shadow_pad is not None:
+        shadow_x = bubble_x - shadow_pad
+        shadow_y = bubble_y - shadow_pad
+        graph += (
+            f"[bg][{next_input}:v]overlay={shadow_x}:{shadow_y}:format=auto[withshadow];"
+            f"[withshadow][fc]overlay={bubble_x}:{bubble_y}:format=auto[withcam];"
+        )
+        next_input += 1
+    else:
+        graph += f"[bg][fc]overlay={bubble_x}:{bubble_y}:format=auto[withcam];"
+
     if with_navbar:
         # Pinned last so it sits above everything except nothing — a real sticky
         # header covers the page, but the face cam bubble is bottom-left anyway.
         graph += (
-            f"[3:v]scale={w}:-1:flags=lanczos[nav];"
+            f"[{next_input}:v]scale={w}:-1:flags=lanczos[nav];"
             f"[withcam][nav]overlay=0:0:format=auto,format=yuv420p[v]"
         )
     else:
@@ -181,6 +195,22 @@ def render(
         shape=cfg.facecam_shape,
     )
 
+    shadow: Optional[Path] = None
+    shadow_pad: Optional[int] = None
+    if cfg.facecam_shadow_opacity > 0:
+        blur, offset = cfg.facecam_shadow_blur, cfg.facecam_shadow_offset
+        shadow, shadow_pad = shadow_overlay(
+            cfg.facecam_diameter,
+            cache / (
+                f"shadow-{cfg.facecam_shape}-{cfg.facecam_diameter}"
+                f"-{cfg.facecam_shadow_opacity:.2f}-{blur}-{offset}.png"
+            ),
+            shape=cfg.facecam_shape,
+            opacity=cfg.facecam_shadow_opacity,
+            blur_px=blur,
+            offset_px=offset,
+        )
+
     duration = resolve_duration(facecam, cfg)
     facecam_eq = exposure.eq_filter(
         facecam,
@@ -192,7 +222,13 @@ def render(
         saturation=cfg.facecam_saturation,
     )
     with_navbar = navbar is not None and navbar.exists()
-    graph = build_filtergraph(cfg, with_navbar=with_navbar, duration=duration, facecam_eq=facecam_eq)
+    graph = build_filtergraph(
+        cfg,
+        with_navbar=with_navbar,
+        duration=duration,
+        facecam_eq=facecam_eq,
+        shadow_pad=shadow_pad,
+    )
     audio = keep_audio and has_audio(facecam)
 
     def inputs() -> List[str]:
@@ -201,7 +237,7 @@ def render(
             # Loop the clip if it is shorter than the target duration.
             "-stream_loop", "-1", "-ss", f"{cfg.facecam_start}", "-t", f"{duration}", "-i", str(facecam),
             "-i", str(mask),
-        ] + (["-i", str(navbar)] if with_navbar else [])
+        ] + (["-i", str(shadow)] if shadow else []) + (["-i", str(navbar)] if with_navbar else [])
 
     def encode(dest: Path, video_args: List[str], audio_args: List[str]) -> Path:
         cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", *inputs(),

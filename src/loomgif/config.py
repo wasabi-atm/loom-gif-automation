@@ -95,9 +95,24 @@ class RenderConfig:
     # Face cam bubble, expressed as a fraction of canvas height so it scales cleanly.
     facecam_diameter_ratio: float = field(default_factory=lambda: _float("FACECAM_DIAMETER_RATIO", 0.32))
     facecam_margin_ratio: float = field(default_factory=lambda: _float("FACECAM_MARGIN_RATIO", 0.045))
-    # "squircle" (default) or "circle". No ring, no shadow — the bare shape sits
-    # straight on the page, the way a screen recorder's own bubble does.
+    # "squircle" (default) or "circle". No ring — just the shape and a soft
+    # shadow, the way a screen recorder's own bubble looks.
     facecam_shape: str = field(default_factory=lambda: os.getenv("FACECAM_SHAPE", "squircle").strip().lower())
+
+    # Drop shadow, as fractions of the bubble size so it scales with the canvas.
+    # Wide and faint reads as depth; tight and dark reads as an outline.
+    # Set FACECAM_SHADOW_OPACITY=0 to turn it off.
+    facecam_shadow_opacity: float = field(default_factory=lambda: _float("FACECAM_SHADOW_OPACITY", 0.30))
+    facecam_shadow_blur_ratio: float = field(default_factory=lambda: _float("FACECAM_SHADOW_BLUR_RATIO", 0.085))
+    facecam_shadow_offset_ratio: float = field(default_factory=lambda: _float("FACECAM_SHADOW_OFFSET_RATIO", 0.035))
+
+    @property
+    def facecam_shadow_blur(self) -> int:
+        return max(int(self.facecam_diameter * self.facecam_shadow_blur_ratio), 1)
+
+    @property
+    def facecam_shadow_offset(self) -> int:
+        return max(int(self.facecam_diameter * self.facecam_shadow_offset_ratio), 0)
     # Seconds into the source footage to start using (lets you skip a slate/countdown).
     facecam_start: float = field(default_factory=lambda: _float("FACECAM_START", 0.0))
 

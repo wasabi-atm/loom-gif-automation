@@ -36,17 +36,29 @@ class ImageKitUploader:
         self._sdk = self._init_sdk()
 
     def _init_sdk(self):
+        """Build the client for whichever SDK generation is installed.
+
+        The constructor changed between majors: 3.x/4.x take public_key and
+        url_endpoint alongside the private key, while 5.x takes the private key
+        alone and derives the rest. Passing the wrong set raises TypeError, so
+        the signature decides rather than a try/except ladder.
+        """
         try:
+            import inspect  # noqa: WPS433
+
             from imagekitio import ImageKit  # noqa: WPS433
         except ImportError:
             log.debug("imagekitio SDK not installed — using REST upload")
             return None
+
         try:
-            return ImageKit(
-                private_key=self.cfg.private_key,
-                public_key=self.cfg.public_key,
-                url_endpoint=self.cfg.url_endpoint,
-            )
+            accepted = inspect.signature(ImageKit.__init__).parameters
+            kwargs = {"private_key": self.cfg.private_key}
+            if "public_key" in accepted:
+                kwargs["public_key"] = self.cfg.public_key
+            if "url_endpoint" in accepted:
+                kwargs["url_endpoint"] = self.cfg.url_endpoint
+            return ImageKit(**kwargs)
         except Exception as exc:  # noqa: BLE001
             log.warning("ImageKit SDK init failed (%s) — using REST upload", exc)
             return None
