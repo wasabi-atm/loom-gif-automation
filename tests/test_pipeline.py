@@ -646,12 +646,51 @@ class TestSkipExisting(unittest.TestCase):
         """The Media Library listing is eventually consistent: a file uploaded a
         minute ago serves over the CDN while still missing from /v1/files, so a
         listing-based check misses exactly the recent uploads a re-run cares
-        about. Verified live — two fresh uploads returned HEAD 200 and did not
-        appear in the listing."""
-        import inspect
+        about. Verified live — two fresh uploads returned HEAD 200 while absent
+        from the listing."""
+        from unittest import mock
 
+        from loomgif.config import ImageKitConfig
         from loomgif.imagekit_client import ImageKitUploader
 
-        source = inspect.getsource(ImageKitUploader.find)
-        self.assertIn("requests.head", source)
-        self.assertNotIn("/v1/files", source)
+        uploader = ImageKitUploader.__new__(ImageKitUploader)
+        uploader.cfg = ImageKitConfig(
+            url_endpoint="https://ik.imagekit.io/x", public_key="p",
+            private_key="s", folder="/outreach/loom-gif",
+        )
+
+        with mock.patch("loomgif.imagekit_client.requests") as requests_mock:
+            requests_mock.head.return_value = mock.Mock(status_code=200)
+            found = uploader.find("taskade-com.gif")
+
+        self.assertIsNotNone(found)
+        self.assertEqual(found.url, "https://ik.imagekit.io/x/outreach/loom-gif/taskade-com.gif")
+        requests_mock.head.assert_called_once()
+        requests_mock.get.assert_not_called()   # never consults the listing
+
+    def test_missing_file_returns_none(self):
+        from unittest import mock
+
+        from loomgif.config import ImageKitConfig
+        from loomgif.imagekit_client import ImageKitUploader
+
+        uploader = ImageKitUploader.__new__(ImageKitUploader)
+        uploader.cfg = ImageKitConfig(url_endpoint="https://ik.imagekit.io/x", public_key="p",
+                                      private_key="s", folder="/f")
+        with mock.patch("loomgif.imagekit_client.requests") as requests_mock:
+            requests_mock.head.return_value = mock.Mock(status_code=404)
+            self.assertIsNone(uploader.find("nope.gif"))
+
+    def test_a_network_failure_is_treated_as_absent(self):
+        """Failing open means a flaky check costs a re-render, not a lost GIF."""
+        from unittest import mock
+
+        from loomgif.config import ImageKitConfig
+        from loomgif.imagekit_client import ImageKitUploader
+
+        uploader = ImageKitUploader.__new__(ImageKitUploader)
+        uploader.cfg = ImageKitConfig(url_endpoint="https://ik.imagekit.io/x", public_key="p",
+                                      private_key="s", folder="/f")
+        with mock.patch("loomgif.imagekit_client.requests") as requests_mock:
+            requests_mock.head.side_effect = OSError("network down")
+            self.assertIsNone(uploader.find("x.gif"))
