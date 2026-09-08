@@ -14,7 +14,7 @@ from loomgif import csv_merge, email_embed  # noqa: E402
 from loomgif.compose import build_filtergraph  # noqa: E402
 from loomgif.config import RenderConfig  # noqa: E402
 from loomgif.instantly import MEDIA_COLUMNS, VAR_GIF  # noqa: E402
-from loomgif.overlays import circle_mask, ring_overlay  # noqa: E402
+from loomgif.overlays import facecam_mask  # noqa: E402
 from loomgif.screenshot import normalise_url, slug_for  # noqa: E402
 
 
@@ -44,24 +44,49 @@ class TestRenderConfig(unittest.TestCase):
         expected_y = cfg.height - cfg.facecam_diameter - cfg.facecam_margin
         self.assertIn(f"overlay={cfg.facecam_margin}:{expected_y}", graph)
         self.assertIn("alphamerge", graph)
+        # No ring or shadow layer: the shape sits straight on the page.
+        self.assertNotIn("withring", graph)
         # The crop window must be time-varying, or the page never scrolls.
         self.assertIn("crop=%d:%d:0:'" % (cfg.width, cfg.height), graph)
         self.assertIn("t/", graph)
 
 
-class TestOverlays(unittest.TestCase):
-    def test_mask_and_ring_sizes(self):
+class TestFacecamMask(unittest.TestCase):
+    def test_mask_is_greyscale_and_exact_size(self):
         with tempfile.TemporaryDirectory() as tmp:
             from PIL import Image
 
-            with Image.open(circle_mask(120, Path(tmp) / "m.png")) as mask:
+            with Image.open(facecam_mask(120, Path(tmp) / "m.png")) as mask:
                 self.assertEqual(mask.size, (120, 120))
-                self.assertEqual(mask.mode, "L")
+                self.assertEqual(mask.mode, "L")  # alphamerge needs a single channel
 
-            # The ring canvas is padded by shadow_px on every side.
-            with Image.open(ring_overlay(120, 4, "#FFFFFF", Path(tmp) / "r.png", shadow_px=10)) as ring:
-                self.assertEqual(ring.size, (140, 140))
-                self.assertEqual(ring.mode, "RGBA")
+    def test_squircle_keeps_more_area_than_a_circle(self):
+        """A squircle fills its box more fully — that is what makes it read as a
+        rounded square rather than a circle."""
+        from PIL import Image
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            with Image.open(facecam_mask(200, tmp / "sq.png", "squircle")) as squircle:
+                sq_area = sum(squircle.point(lambda v: 1 if v > 127 else 0).getdata())
+            with Image.open(facecam_mask(200, tmp / "ci.png", "circle")) as circle:
+                ci_area = sum(circle.point(lambda v: 1 if v > 127 else 0).getdata())
+
+            box = 200 * 200
+            self.assertGreater(sq_area, ci_area)
+            self.assertLess(sq_area, box)          # still rounded, not a plain square
+            self.assertAlmostEqual(ci_area / box, 3.14159 / 4, places=2)
+
+    def test_corners_are_transparent_and_centre_is_opaque(self):
+        from PIL import Image
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with Image.open(facecam_mask(200, Path(tmp) / "sq.png")) as mask:
+                self.assertEqual(mask.getpixel((1, 1)), 0)
+                self.assertEqual(mask.getpixel((198, 198)), 0)
+                self.assertEqual(mask.getpixel((100, 100)), 255)
+                # Flat along the edge midpoints, unlike a circle.
+                self.assertEqual(mask.getpixel((100, 2)), 255)
 
 
 class TestEmailEmbed(unittest.TestCase):
@@ -150,13 +175,13 @@ class TestNavbarLayer(unittest.TestCase):
         cfg = RenderConfig()
         graph = build_filtergraph(cfg, with_navbar=True)
         # Scaled to canvas width and pinned at the very top, composited last.
-        self.assertIn(f"[4:v]scale={cfg.width}:-1", graph)
-        self.assertIn("[withring][nav]overlay=0:0", graph)
+        self.assertIn(f"[3:v]scale={cfg.width}:-1", graph)
+        self.assertIn("[withcam][nav]overlay=0:0", graph)
         self.assertTrue(graph.endswith("[v]"))
 
     def test_graph_without_navbar_uses_no_fifth_input(self):
         graph = build_filtergraph(RenderConfig(), with_navbar=False)
-        self.assertNotIn("[4:v]", graph)
+        self.assertNotIn("[3:v]", graph)
         self.assertTrue(graph.endswith("[v]"))
 
 

@@ -164,15 +164,22 @@ output/
 1. The full-page screenshot is scaled to canvas width and padded to at least
    canvas height, then a **crop window walks down it** on a smoothstep ease, so
    the page reads as a real scroll rather than a linear pan.
-2. The face cam is cover-cropped to a square, resized to the bubble, and made
-   circular with `alphamerge` against a Pillow-generated anti-aliased mask.
-3. A ring-and-shadow PNG is laid over the seam.
-4. If the site has a solid sticky header, it is composited **pinned at the top**.
+2. The face cam is cover-cropped to a square, resized to the bubble, and shaped
+   with `alphamerge` against a Pillow-generated anti-aliased mask.
+3. If the site has a solid sticky header, it is composited **pinned at the top**.
 
 Masks are generated once at 4x and cached in `output/.overlays/`.
 
+The bubble is a **squircle** — a superellipse, `|x|^n + |y|^n = 1` at n=4.5.
+No ring, no drop shadow: the shape sits straight on the page the way a screen
+recorder's own bubble does. `FACECAM_SHAPE=circle` switches it back to a circle.
+
+Worth knowing: with no border, a bright bubble on a white page has nothing
+separating it from the background. That is the cost of dropping the ring, and it
+shows most on light sites.
+
 Geometry is env-tunable: `FACECAM_DIAMETER_RATIO` (0.32 of canvas height),
-`FACECAM_MARGIN_RATIO`, `FACECAM_RING_PX`, `FACECAM_RING_COLOR`, `SCROLL_RATIO`.
+`FACECAM_MARGIN_RATIO`, `FACECAM_SHAPE`, `SCROLL_RATIO`.
 
 ### The site's navigation
 
@@ -230,22 +237,26 @@ GIF 600px @10fps / 256 colours -> 1.68 MB, 5.00s
 
 ### Face cam exposure
 
-Webcam takes vary a lot — Sam's two clips measure 129 and 88 mean luma, a 40-point
-gap — so a fixed brightness bump would blow out one and leave the other dark.
+Webcam takes vary a lot, so a fixed brightness bump would blow out one clip and
+leave another dark. Each clip is **measured once** (a few sampled frames, cached
+per file) and given the gamma that lifts it to `FACECAM_TARGET_LUMA`. Bright
+takes are left alone — the correction is clamped to never darken.
 
-Each clip is instead **measured once** (a few sampled frames of the square centre
-crop, cached per file) and given the gamma that lifts it to `FACECAM_TARGET_LUMA`.
-Dark takes get rescued; bright ones are left alone, since the correction is
-clamped to never darken.
+**The measurement reads the face region, not the whole frame.** This matters more
+than it sounds. Sam's first clip sits in front of a bright window: the full frame
+averages 129 while his face is 104. Measuring the whole frame reads the room, asks
+for almost no correction, and leaves a backlit face dark — which is exactly what
+happened before this was fixed. Measured on the centre box instead, two clips that
+differ by 40 points overall both come in at 104, and both get the lift they need.
 
 ```
-sam-facecam-1.mp4 mean luma 129.0/255 -> gamma 1.11
-sam-facecam-2.mp4 mean luma  88.4/255 -> gamma 1.73
+sam-facecam-1.mp4 face luma 103.8/255 -> gamma 1.69   (frame average: 129)
+sam-facecam-2.mp4 face luma 103.6/255 -> gamma 1.70   (frame average:  88)
 ```
 
-The target sits high (138) on purpose: dark clothing drags the square crop's
-average well below the face's own brightness, and the bubble renders small enough
-that an under-lit face just reads as murk.
+Gamma maps 0 to 0 and 255 to 255 by definition, so lifting cannot clip highlights
+— a window behind the subject compresses rather than blowing out. It does flatten
+contrast, which `FACECAM_CONTRAST` (1.16) puts back.
 
 Set `FACECAM_GAMMA` to a number to skip the measurement, or
 `FACECAM_AUTO_EXPOSURE=0` to turn it off. `FACECAM_BRIGHTNESS`,

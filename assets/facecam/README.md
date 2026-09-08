@@ -11,7 +11,8 @@ Real files are gitignored — only this README and `.gitkeep` are tracked.
 
 - **Square or 4:3 framing.** The pipeline centre-crops to a square, so anything
   at the far left or right of frame gets cut. Head roughly centred, a little
-  headroom.
+  headroom. Exposure is measured from the centre box, so centred framing also
+  gets the colour correction right.
 - **1080p or better.** The bubble renders at ~280px on a 1200x675 canvas, so
   there is plenty of headroom for downscaling, and none for upscaling.
 - **Plain, contrasting background.** The bubble sits over a busy website

@@ -17,11 +17,9 @@ from typing import List, Optional
 
 from . import exposure
 from .config import RenderConfig
-from .overlays import circle_mask, ring_overlay
+from .overlays import facecam_mask
 
 log = logging.getLogger(__name__)
-
-SHADOW_PAD = 18
 
 _ENCODERS: Optional[set] = None
 
@@ -125,8 +123,6 @@ def build_filtergraph(
 
     bubble_x = margin
     bubble_y = h - d - margin
-    ring_x = bubble_x - SHADOW_PAD
-    ring_y = bubble_y - SHADOW_PAD
 
     # smoothstep(p) = p^2 * (3 - 2p), with p clamped to [0,1]
     eq = f"{facecam_eq}," if facecam_eq else ""
@@ -145,17 +141,16 @@ def build_filtergraph(
         f"crop={d}:{d},setsar=1,{eq}format=rgba[fcraw];"
         f"[fcraw][2:v]alphamerge[fc];"
         f"[bg][fc]overlay={bubble_x}:{bubble_y}:format=auto[withcam];"
-        f"[withcam][3:v]overlay={ring_x}:{ring_y}:format=auto[withring];"
     )
     if with_navbar:
         # Pinned last so it sits above everything except nothing — a real sticky
         # header covers the page, but the face cam bubble is bottom-left anyway.
         graph += (
-            f"[4:v]scale={w}:-1:flags=lanczos[nav];"
-            f"[withring][nav]overlay=0:0:format=auto,format=yuv420p[v]"
+            f"[3:v]scale={w}:-1:flags=lanczos[nav];"
+            f"[withcam][nav]overlay=0:0:format=auto,format=yuv420p[v]"
         )
     else:
-        graph += "[withring]format=yuv420p[v]"
+        graph += "[withcam]format=yuv420p[v]"
     return graph
 
 
@@ -180,13 +175,10 @@ def render(
 
     out_stem.parent.mkdir(parents=True, exist_ok=True)
     cache = out_stem.parent / ".overlays"
-    mask = circle_mask(cfg.facecam_diameter, cache / f"mask-{cfg.facecam_diameter}.png")
-    ring = ring_overlay(
+    mask = facecam_mask(
         cfg.facecam_diameter,
-        cfg.facecam_ring_px,
-        cfg.facecam_ring_color,
-        cache / f"ring-{cfg.facecam_diameter}-{cfg.facecam_ring_px}-{cfg.facecam_ring_color.lstrip('#')}.png",
-        shadow_px=SHADOW_PAD,
+        cache / f"mask-{cfg.facecam_shape}-{cfg.facecam_diameter}.png",
+        shape=cfg.facecam_shape,
     )
 
     duration = resolve_duration(facecam, cfg)
@@ -209,7 +201,6 @@ def render(
             # Loop the clip if it is shorter than the target duration.
             "-stream_loop", "-1", "-ss", f"{cfg.facecam_start}", "-t", f"{duration}", "-i", str(facecam),
             "-i", str(mask),
-            "-i", str(ring),
         ] + (["-i", str(navbar)] if with_navbar else [])
 
     def encode(dest: Path, video_args: List[str], audio_args: List[str]) -> Path:

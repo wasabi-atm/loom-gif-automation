@@ -95,23 +95,23 @@ class RenderConfig:
     # Face cam bubble, expressed as a fraction of canvas height so it scales cleanly.
     facecam_diameter_ratio: float = field(default_factory=lambda: _float("FACECAM_DIAMETER_RATIO", 0.32))
     facecam_margin_ratio: float = field(default_factory=lambda: _float("FACECAM_MARGIN_RATIO", 0.045))
-    facecam_ring_px: int = field(default_factory=lambda: _int("FACECAM_RING_PX", 5))
-    facecam_ring_color: str = field(default_factory=lambda: os.getenv("FACECAM_RING_COLOR", "#FFFFFF"))
+    # "squircle" (default) or "circle". No ring, no shadow — the bare shape sits
+    # straight on the page, the way a screen recorder's own bubble does.
+    facecam_shape: str = field(default_factory=lambda: os.getenv("FACECAM_SHAPE", "squircle").strip().lower())
     # Seconds into the source footage to start using (lets you skip a slate/countdown).
     facecam_start: float = field(default_factory=lambda: _float("FACECAM_START", 0.0))
 
     # Auto-exposure. Webcam takes vary widely, so each clip is measured once and
-    # lifted to `facecam_target_luma`. The target sits high because dark clothing
-    # drags the square crop's average well below the face's own brightness, and
-    # the bubble renders small enough that an under-lit face just reads as murk.
-    # Setting FACECAM_GAMMA disables the measurement and applies that value.
+    # lifted to `facecam_target_luma`. The measurement reads the face region
+    # rather than the whole frame, so a bright window behind the subject cannot
+    # mask a dark face. Setting FACECAM_GAMMA skips the measurement entirely.
     facecam_auto_exposure: bool = field(
         default_factory=lambda: os.getenv("FACECAM_AUTO_EXPOSURE", "1") not in ("0", "false", "False")
     )
-    facecam_target_luma: float = field(default_factory=lambda: _float("FACECAM_TARGET_LUMA", 138.0))
+    facecam_target_luma: float = field(default_factory=lambda: _float("FACECAM_TARGET_LUMA", 150.0))
     facecam_gamma: Optional[float] = field(default_factory=lambda: _opt_float("FACECAM_GAMMA"))
     facecam_brightness: float = field(default_factory=lambda: _float("FACECAM_BRIGHTNESS", 0.02))
-    facecam_contrast: float = field(default_factory=lambda: _float("FACECAM_CONTRAST", 1.06))
+    facecam_contrast: float = field(default_factory=lambda: _float("FACECAM_CONTRAST", 1.16))
     facecam_saturation: float = field(default_factory=lambda: _float("FACECAM_SATURATION", 1.10))
 
     # How far down the captured page the scroll travels, as a fraction. Lower is

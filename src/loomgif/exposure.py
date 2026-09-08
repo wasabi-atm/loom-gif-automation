@@ -23,15 +23,22 @@ log = logging.getLogger(__name__)
 _CACHE: Dict[Tuple[str, float], float] = {}
 
 # Never darken. A clip that is already bright is left alone; the point is to
-# rescue dark ones, not to flatten everything to the same look.
+# rescue dark ones, not to flatten everything to the same look. Gamma maps 0 to
+# 0 and 255 to 255 by definition, so lifting cannot clip highlights — a bright
+# window behind the subject compresses rather than blowing out.
 GAMMA_MIN = 1.0
-GAMMA_MAX = 1.75
+GAMMA_MAX = 2.20
 
 
 def mean_luma(path: Path, sample_seconds: float = 2.5, sample_fps: int = 4) -> Optional[float]:
-    """Average luma (0-255) of the square centre crop — the region actually used.
+    """Average luma (0-255) of the face region, not the whole frame.
 
-    Samples a handful of frames rather than decoding the whole clip.
+    Measuring the whole square crop reads the room, not the subject. Sam's first
+    clip sits in front of a bright window: the full crop averages 129 while his
+    face is 104, so a whole-frame reading asks for almost no correction and
+    leaves a backlit face dark. Sampling the centre box — where a head sits in a
+    webcam frame — gives 104 and 104 for two clips that differ by 40 points
+    overall, which is the number worth correcting against.
     """
     key = (str(path), path.stat().st_mtime if path.exists() else 0.0)
     if key in _CACHE:
@@ -40,7 +47,10 @@ def mean_luma(path: Path, sample_seconds: float = 2.5, sample_fps: int = 4) -> O
     cmd = [
         "ffmpeg", "-hide_banner", "-nostats", "-t", str(sample_seconds), "-i", str(path),
         "-vf", (
+            # Square centre crop (what the bubble shows), then the middle box of
+            # that, biased slightly up towards the face.
             "crop='min(iw,ih)':'min(iw,ih)',"
+            "crop=iw*0.5:ih*0.55:iw*0.25:ih*0.12,"
             f"fps={sample_fps},signalstats,"
             "metadata=print:key=lavfi.signalstats.YAVG:file=-"
         ),
@@ -59,7 +69,7 @@ def mean_luma(path: Path, sample_seconds: float = 2.5, sample_fps: int = 4) -> O
 
     average = sum(values) / len(values)
     _CACHE[key] = average
-    log.info("%s mean luma %.1f/255 (%d samples)", path.name, average, len(values))
+    log.info("%s face luma %.1f/255 (%d samples)", path.name, average, len(values))
     return average
 
 
