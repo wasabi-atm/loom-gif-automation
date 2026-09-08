@@ -625,3 +625,33 @@ class TestRedirectResolution(unittest.TestCase):
 
         prospect = Prospect(email="a@x.com", website="jaama.co.uk")
         self.assertEqual(prospect.resolve(follow_redirects=False), "https://jaama.co.uk")
+
+
+class TestSkipExisting(unittest.TestCase):
+    def test_hosted_url_is_predicted_without_the_api(self):
+        from loomgif.config import ImageKitConfig
+        from loomgif.imagekit_client import ImageKitUploader
+
+        uploader = ImageKitUploader.__new__(ImageKitUploader)
+        uploader.cfg = ImageKitConfig(
+            url_endpoint="https://ik.imagekit.io/motiontheagency/",
+            public_key="p", private_key="s", folder="/outreach/loom-gif",
+        )
+        self.assertEqual(
+            uploader.hosted_url("taskade-com.gif"),
+            "https://ik.imagekit.io/motiontheagency/outreach/loom-gif/taskade-com.gif",
+        )
+
+    def test_existence_is_checked_on_the_cdn_not_the_listing(self):
+        """The Media Library listing is eventually consistent: a file uploaded a
+        minute ago serves over the CDN while still missing from /v1/files, so a
+        listing-based check misses exactly the recent uploads a re-run cares
+        about. Verified live — two fresh uploads returned HEAD 200 and did not
+        appear in the listing."""
+        import inspect
+
+        from loomgif.imagekit_client import ImageKitUploader
+
+        source = inspect.getsource(ImageKitUploader.find)
+        self.assertIn("requests.head", source)
+        self.assertNotIn("/v1/files", source)

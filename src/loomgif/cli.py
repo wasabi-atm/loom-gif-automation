@@ -59,7 +59,7 @@ def _apply_overrides(settings: Settings, args: argparse.Namespace) -> Settings:
 def _report(results: List[ProspectResult], settings: Settings, push: bool, campaign: Optional[str]) -> int:
     manifest = csv_merge.write_manifest([r.as_manifest_row() for r in results], settings.output_dir / "manifest.csv")
 
-    ok = [r for r in results if r.status in ("ok", "rendered")]
+    ok = [r for r in results if r.status in ("ok", "rendered", "skipped")]
     failed = [r for r in results if r.status == "failed"]
 
     if push:
@@ -124,6 +124,7 @@ def cmd_render(args: argparse.Namespace) -> int:
         make_gif=not args.no_gif,
         force=args.force,
         resolve_redirects=not args.no_follow_redirects,
+        skip_existing=args.skip_existing,
     )
     if result.status == "failed":
         print(f"Failed: {result.note}", file=sys.stderr)
@@ -165,6 +166,7 @@ def cmd_batch(args: argparse.Namespace) -> int:
         make_gif=not args.no_gif,
         force=args.force,
         resolve_redirects=not args.no_follow_redirects,
+        skip_existing=args.skip_existing,
     )
     return _report(results, settings, push=args.push, campaign=args.campaign)
 
@@ -324,6 +326,8 @@ def build_parser() -> argparse.ArgumentParser:
         sub.add_argument("--no-gif", action="store_true")
         sub.add_argument("--no-mp4", action="store_true")
         sub.add_argument("--force", action="store_true", help="Re-screenshot even if one is cached")
+        sub.add_argument("--skip-existing", action="store_true",
+                         help="Leave prospects whose GIF is already on ImageKit untouched")
         sub.add_argument("--no-pin-nav", action="store_true",
                          help="Let the site header scroll away instead of pinning it")
         sub.add_argument("--no-follow-redirects", action="store_true",

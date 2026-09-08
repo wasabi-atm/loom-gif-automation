@@ -204,6 +204,40 @@ class ImageKitUploader:
 
     # ------------------------------------------------------------------ #
 
+    def hosted_url(self, file_name: str, folder: Optional[str] = None) -> str:
+        """The CDN URL a file would have, without asking the API."""
+        folder = (folder if folder is not None else self.cfg.folder).strip("/")
+        endpoint = self.cfg.url_endpoint.rstrip("/")
+        return f"{endpoint}/{folder}/{file_name}" if folder else f"{endpoint}/{file_name}"
+
+    def find(self, file_name: str, folder: Optional[str] = None) -> Optional[Upload]:
+        """Whether a file is already hosted, so a re-run need not redo the work.
+
+        Asks the CDN with a HEAD rather than the Media Library listing. The
+        listing is eventually consistent: a file uploaded a minute ago serves
+        perfectly over the CDN while still being absent from /v1/files, so
+        listing-based checks miss exactly the recent uploads a re-run cares about.
+        """
+        url = self.hosted_url(file_name, folder)
+        try:
+            response = requests.head(url, timeout=30, allow_redirects=True)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Existence check for %s failed (%s) — treating as absent", file_name, exc)
+            return None
+        if response.status_code != 200:
+            return None
+        return Upload(url=url, file_id="", name=file_name, path=f"/{(folder or self.cfg.folder).strip('/')}/{file_name}")
+
+    def fetch(self, url: str, dest: Path) -> Path:
+        """Download a hosted file so it can be hashed and kept locally."""
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        response = requests.get(url, stream=True, timeout=180)
+        response.raise_for_status()
+        with dest.open("wb") as handle:
+            for chunk in response.iter_content(chunk_size=1024 * 256):
+                handle.write(chunk)
+        return dest
+
     def transform(self, url: str, tr: str) -> str:
         """Append an ImageKit transformation, e.g. tr='w-600,f-gif'.
 

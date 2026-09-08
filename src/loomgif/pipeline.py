@@ -126,10 +126,20 @@ def run_one(
     make_gif: bool = True,
     force: bool = False,
     resolve_redirects: bool = True,
+    skip_existing: bool = False,
 ) -> ProspectResult:
     """Screenshot, composite, GIF and host the media for a single prospect."""
     result = ProspectResult(prospect=prospect)
     cfg = settings.render
+
+    if skip_existing and upload:
+        existing = _already_hosted(prospect, settings, uploader)
+        if existing is not None:
+            result.urls = existing
+            result.status = "skipped"
+            result.note = "already hosted"
+            log.info("%s already hosted — not rebuilt", prospect.slug)
+            return result
     if not prospect.screenshot:
         prospect.resolve(resolve_redirects)
     work = settings.output_dir / prospect.slug
@@ -185,6 +195,29 @@ def run_one(
         log.error("Failed for %s (%s): %s", prospect.email, prospect.website, exc)
 
     return result
+
+
+def _already_hosted(
+    prospect: Prospect,
+    settings: Settings,
+    uploader: Optional[ImageKitUploader],
+) -> Optional[Dict[str, str]]:
+    """URLs for a prospect whose GIF is already on ImageKit, or None."""
+    uploader = uploader or ImageKitUploader(settings.imagekit)
+    found = uploader.find(f"{prospect.slug}.gif")
+    if found is None:
+        return None
+
+    # No version parameter here, deliberately. The key exists to defeat the CDN
+    # cache after an overwrite; skipping means nothing was overwritten, so there
+    # is nothing to defeat and the plain URL is the stable one. Hashing the
+    # delivered bytes instead would be wrong — ImageKit re-optimises on delivery,
+    # so that digest differs from the local file a fresh render would hash, and
+    # the same asset would get two different URLs depending on the code path.
+    urls = {VAR_GIF: found.url, VAR_LINK: _click_url(prospect, settings)}
+    if settings.render.gif_width > SMALL_VARIANT_WIDTH:
+        urls[VAR_GIF_SMALL] = uploader.transform(found.url, f"w-{SMALL_VARIANT_WIDTH}")
+    return urls
 
 
 def _upload_all(
@@ -247,6 +280,7 @@ def run_batch(
     make_gif: bool = True,
     force: bool = False,
     resolve_redirects: bool = True,
+    skip_existing: bool = False,
 ) -> List[ProspectResult]:
     uploader = ImageKitUploader(settings.imagekit) if upload else None
     results: List[ProspectResult] = []
@@ -263,6 +297,7 @@ def run_batch(
                 make_gif=make_gif,
                 force=force,
                 resolve_redirects=resolve_redirects,
+                skip_existing=skip_existing,
             )
         )
     return results
