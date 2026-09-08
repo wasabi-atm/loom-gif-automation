@@ -212,14 +212,19 @@ def render(
 # --------------------------------------------------------------------------- #
 
 # Outlook and Gmail both get unhappy with heavy GIFs, so we walk down this ladder
-# (width, fps, palette colours) until the file fits the byte budget.
+# of (width multiplier, fps multiplier, palette colours) until the file fits.
+#
+# Width is given up last and deliberately. The email tag declares width="600",
+# so a narrower GIF gets upscaled by the client and looks soft — whereas a slow
+# page scroll survives 8fps and a small palette almost unnoticed.
 _GIF_LADDER = [
     (1.00, 1.00, 256),
-    (1.00, 0.83, 200),
-    (0.85, 0.83, 160),
-    (0.75, 0.66, 128),
-    (0.66, 0.58, 96),
-    (0.55, 0.50, 64),
+    (1.00, 0.83, 192),
+    (1.00, 0.66, 128),
+    (1.00, 0.50, 96),
+    (1.00, 0.50, 64),
+    (0.85, 0.50, 64),
+    (0.70, 0.50, 64),
 ]
 
 
