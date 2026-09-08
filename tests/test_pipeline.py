@@ -358,8 +358,7 @@ class TestBubbleShadow(unittest.TestCase):
 class TestHostedUrls(unittest.TestCase):
     def test_version_is_appended_as_a_cache_key(self):
         """Overwriting keeps the URL, but ImageKit's CDN serves the previously
-        cached bytes — verified live: the plain URL returned the old 1.1MB file
-        while the versioned one returned the new 593KB."""
+        cached bytes, so the URL handed to Instantly carries a content key."""
         from loomgif.imagekit_client import Upload
 
         upload = Upload(url="https://ik.imagekit.io/x/a.gif", file_id="f", name="a.gif",
@@ -458,3 +457,40 @@ class TestCampaignPreflight(unittest.TestCase):
         from loomgif.instantly import MEDIA_COLUMNS
 
         self.assertTrue(any(" " in name for name in MEDIA_COLUMNS))
+
+
+class TestContentCacheKey(unittest.TestCase):
+    """The key must come from the file's contents.
+
+    ImageKit's own versionInfo.id does NOT change on overwrite — the name goes
+    to "Version 5" while the id stays put — so keying on it busts the CDN cache
+    exactly once and is stale from then on.
+    """
+
+    def test_same_bytes_give_the_same_key(self):
+        from loomgif.imagekit_client import content_key
+
+        with tempfile.TemporaryDirectory() as tmp:
+            a, b = Path(tmp) / "a.gif", Path(tmp) / "b.gif"
+            a.write_bytes(b"identical"), b.write_bytes(b"identical")
+            self.assertEqual(content_key(a), content_key(b))
+
+    def test_changed_bytes_give_a_different_key(self):
+        from loomgif.imagekit_client import content_key
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "a.gif"
+            path.write_bytes(b"first render")
+            before = content_key(path)
+            path.write_bytes(b"second render")
+            self.assertNotEqual(before, content_key(path))
+
+    def test_key_is_short_and_url_safe(self):
+        from loomgif.imagekit_client import content_key
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "a.gif"
+            path.write_bytes(b"x")
+            key = content_key(path)
+            self.assertEqual(len(key), 12)
+            self.assertTrue(key.isalnum())

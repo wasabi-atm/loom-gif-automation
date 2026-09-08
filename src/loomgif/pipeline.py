@@ -26,6 +26,9 @@ from .instantly import (
 
 log = logging.getLogger(__name__)
 
+#: Width of the optional `Gif small` variant, for mobile-heavy lists.
+SMALL_VARIANT_WIDTH = 400
+
 
 
 @dataclass
@@ -194,10 +197,10 @@ def _upload_all(
     if cfg.hosts("poster"):
         push("poster", VAR_POSTER, "-poster.jpg")
 
-    # Only worth a second variable if the hosted GIF is actually wider than the
-    # email displays it. At the default 400px they are the same file.
-    if gif and cfg.gif_width > email_embed.default_width():
-        urls[VAR_GIF_SMALL] = uploader.transform(gif.versioned_url, f"w-{email_embed.default_width()}")
+    # A narrower variant for mobile-heavy lists, served by ImageKit rather than
+    # re-encoded. Only worth a second variable when the file is actually wider.
+    if gif and cfg.gif_width > SMALL_VARIANT_WIDTH:
+        urls[VAR_GIF_SMALL] = uploader.transform(gif.versioned_url, f"w-{SMALL_VARIANT_WIDTH}")
     return urls
 
 

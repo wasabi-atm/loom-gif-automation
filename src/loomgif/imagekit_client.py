@@ -6,6 +6,7 @@ endpoint so the pipeline keeps working across SDK major versions.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import mimetypes
 from dataclasses import dataclass
@@ -22,6 +23,15 @@ log = logging.getLogger(__name__)
 UPLOAD_ENDPOINT = "https://upload.imagekit.io/api/v1/files/upload"
 
 
+def content_key(path: Path, length: int = 12) -> str:
+    """Short, stable digest of a file's bytes, used as the CDN cache key."""
+    digest = hashlib.sha1()  # noqa: S324 — cache key, not a security boundary
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()[:length]
+
+
 @dataclass
 class Upload:
     url: str
@@ -32,13 +42,20 @@ class Upload:
 
     @property
     def versioned_url(self) -> str:
-        """URL carrying the upload's version id as a cache key.
+        """URL carrying a hash of the file's contents as a cache key.
 
         Overwriting a file keeps its URL, but ImageKit's CDN goes on serving the
-        previously cached bytes — a re-run after a creative change would send
-        prospects the old GIF. A version parameter sidesteps that, and pins each
-        send to the creative that existed when it went out: already-sent emails
-        keep rendering what was actually sent, and new sends pick up the change.
+        previously cached bytes, so a re-run after a creative change would send
+        prospects the old GIF.
+
+        The key has to be derived from the content, not from ImageKit's response:
+        an overwrite bumps `versionInfo.name` ("Version 5") while leaving
+        `versionInfo.id` unchanged, so keying on the id busts the cache exactly
+        once and then goes stale again.
+
+        A content hash also means an unchanged render keeps its existing URL
+        rather than churning, and each send is pinned to the creative that
+        existed when it went out.
         """
         if not self.version:
             return self.url
@@ -104,7 +121,8 @@ class ImageKitUploader:
         result = self._upload_sdk(path, file_name, folder, tags, unique, overwrite)
         if result is None:
             result = self._upload_rest(path, file_name, folder, tags, unique, overwrite)
-        log.info("Uploaded %s -> %s", path.name, result.url)
+        result.version = content_key(path)
+        log.info("Uploaded %s -> %s", path.name, result.versioned_url)
         return result
 
     def _upload_sdk(self, path, file_name, folder, tags, unique, overwrite) -> Optional[Upload]:
@@ -177,18 +195,11 @@ class ImageKitUploader:
         if not url:
             raise RuntimeError(f"ImageKit response contained no URL: {response!r}")
 
-        version = pick("version_info", "versionInfo")
-        if isinstance(version, dict):
-            version = version.get("id", "")
-        elif version is not None and not isinstance(version, str):
-            version = getattr(version, "id", "") or ""
-
         return Upload(
             url=url,
             file_id=pick("file_id", "fileId") or "",
             name=pick("name") or "",
             path=pick("file_path", "filePath") or "",
-            version=version or "",
         )
 
     # ------------------------------------------------------------------ #

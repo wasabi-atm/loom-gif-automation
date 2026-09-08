@@ -151,7 +151,7 @@ class RenderConfig:
     upload_assets: str = field(default_factory=lambda: os.getenv("UPLOAD_ASSETS", "gif").strip().lower())
 
     gif_max_bytes: int = field(default_factory=lambda: _int("GIF_MAX_BYTES", 1_800_000))
-    gif_width: int = field(default_factory=lambda: _int("GIF_WIDTH", 400))
+    gif_width: int = field(default_factory=lambda: _int("GIF_WIDTH", 600))
     gif_fps: int = field(default_factory=lambda: _int("GIF_FPS", 10))
 
     def hosts(self, asset: str) -> bool:

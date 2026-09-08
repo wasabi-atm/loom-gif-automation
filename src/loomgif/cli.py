@@ -284,7 +284,7 @@ def build_parser() -> argparse.ArgumentParser:
         sub.add_argument("--width", type=int, help="Canvas width (default 1280)")
         sub.add_argument("--height", type=int, help="Canvas height (default 720)")
         sub.add_argument("--fps", type=int, help="Video frame rate (default 24)")
-        sub.add_argument("--gif-width", type=int, help="GIF width in px (default 400)")
+        sub.add_argument("--gif-width", type=int, help="GIF width in px (default 600)")
         sub.add_argument("--gif-fps", type=int, help="GIF frame rate (default 10; snapped to 25/20/10/5 for exact timing)")
         sub.add_argument("--max-mb", type=float, help="GIF size budget in MB (default 1.8)")
         sub.add_argument("--output", help="Output directory (default ./output)")

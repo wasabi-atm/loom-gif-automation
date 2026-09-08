@@ -53,7 +53,7 @@ Run any of them with `--help` for the full flag list. The useful render flags:
 --facecam-start 2.5   # skip a slate at the head of the footage
 --facecam path.mp4    # a specific take, or a directory to rotate between
 --no-pin-nav          # let the site header scroll away instead of pinning it
---gif-width 400       # GIF width; the email <img> tag follows it automatically
+--gif-width 600       # GIF width; the email <img> tag follows it automatically
 --max-mb 1.2          # GIF size budget; the encoder ladders down to fit
 --no-upload           # render locally, skip ImageKit
 --force               # re-screenshot instead of reusing the cached PNG
@@ -337,15 +337,21 @@ key alone — and falls back to the documented REST endpoint if the SDK is absen
 or errors. Both paths are tested against the live account and return identical
 URLs.
 
-**Hosted URLs carry a version parameter**, e.g.
-`…/monday-com.gif?v=6a9fcbacead997d09ada14df`. Overwriting a file keeps its URL,
-but ImageKit's CDN goes on serving the previously cached bytes — verified live,
-where the plain URL still returned the old 1.1MB GIF after a new 897KB one had
-been stored. The version key sidesteps that, and pins each send to the creative
-that existed when it went out: already-sent emails keep rendering what was
-actually sent, and new sends pick up the change.
+**Hosted URLs carry a content hash**, e.g. `…/monday-com.gif?v=4e03f01f3b8f`.
 
-**Only the GIF is uploaded by default** (`UPLOAD_ASSETS=gif`). The MP4, WebM and
+Overwriting a file keeps its URL, but ImageKit's CDN goes on serving the
+previously cached bytes — verified live, where the plain URL still returned a
+stale GIF after a new one had been stored.
+
+The key has to come from the file's contents. ImageKit's own `versionInfo.id`
+does **not** change on overwrite (the name advances to "Version 5" while the id
+stays put), so keying on it busts the cache exactly once and is stale from then
+on. A content hash is stable when nothing changed — no needless URL churn — and
+changes the moment the render does. It also pins each send to the creative that
+existed when it went out: already-sent emails keep rendering what was actually
+sent, and new sends pick up the change.
+
+**Only the GIF is uploaded by default** (`UPLOAD_ASSETS=gif`), at 600px wide. The MP4, WebM and
 poster are local masters; hosting them multiplies storage for files no prospect
 opens. Set `UPLOAD_ASSETS=all` if you want them on the CDN too.
 
