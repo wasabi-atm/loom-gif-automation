@@ -148,9 +148,17 @@ class RenderConfig:
     max_capture_height: int = field(default_factory=lambda: _int("MAX_CAPTURE_HEIGHT", 3600))
 
     # GIF budget. Email clients choke well before this, so we ladder down to fit.
+    upload_assets: str = field(default_factory=lambda: os.getenv("UPLOAD_ASSETS", "gif").strip().lower())
+
     gif_max_bytes: int = field(default_factory=lambda: _int("GIF_MAX_BYTES", 1_800_000))
-    gif_width: int = field(default_factory=lambda: _int("GIF_WIDTH", 600))
+    gif_width: int = field(default_factory=lambda: _int("GIF_WIDTH", 400))
     gif_fps: int = field(default_factory=lambda: _int("GIF_FPS", 10))
+
+    def hosts(self, asset: str) -> bool:
+        """Whether `asset` ('gif', 'mp4', 'poster', 'webm') should be uploaded."""
+        if self.upload_assets in ("all", "*"):
+            return True
+        return asset in {part.strip() for part in self.upload_assets.split(",")}
 
     @property
     def width(self) -> int:

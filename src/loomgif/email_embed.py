@@ -16,7 +16,7 @@ from typing import Optional
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
-from .config import REPO_ROOT
+from .config import REPO_ROOT, RenderConfig
 from .instantly import VAR_GIF, VAR_LINK
 
 log = logging.getLogger(__name__)
@@ -24,6 +24,16 @@ log = logging.getLogger(__name__)
 TEMPLATE_DIR = REPO_ROOT / "templates"
 
 DEFAULT_ALT = "Your homepage, with a few notes from me"
+
+
+def default_width() -> int:
+    """Display width for the <img>, taken from the render config.
+
+    These must agree. A hosted GIF narrower than the tag's width gets upscaled
+    by the client and looks soft; wider and the extra pixels are paid for and
+    thrown away.
+    """
+    return RenderConfig().gif_width
 
 _env = Environment(
     loader=FileSystemLoader(str(TEMPLATE_DIR)),
@@ -37,7 +47,7 @@ def snippet(
     gif_url: str = "{{" + VAR_GIF + "}}",
     link_url: str = "",
     alt: str = DEFAULT_ALT,
-    width: int = 600,
+    width: Optional[int] = None,
 ) -> str:
     """Render the sequence-body tag.
 
@@ -46,11 +56,12 @@ def snippet(
     """
     if not alt or not alt.strip():
         raise ValueError("Alt text is required — clients block images by default and the reader sees an empty box.")
+    width = width or default_width()
     template = _env.get_template("email_embed.html.j2")
     return template.render(gif_url=gif_url, link_url=link_url, alt=alt, width=width).strip()
 
 
-def campaign_snippet(with_link: bool = False, alt: str = DEFAULT_ALT, width: int = 600) -> str:
+def campaign_snippet(with_link: bool = False, alt: str = DEFAULT_ALT, width: Optional[int] = None) -> str:
     """The snippet as it goes into Instantly, variables and all.
 
     `with_link` wraps the image in an <a> pointing at {{Loom link}} — only use it
@@ -70,11 +81,12 @@ def preview(
     company: str = "",
     link_url: str = "",
     alt: str = DEFAULT_ALT,
-    width: int = 600,
+    width: Optional[int] = None,
     body_before: Optional[str] = None,
     body_after: Optional[str] = None,
 ) -> Path:
     """Write a browser-openable preview of the embed with a real GIF URL."""
+    width = width or default_width()
     embed = snippet(gif_url=gif_url, link_url=link_url, alt=alt, width=width)
     html = _env.get_template("email_preview.html.j2").render(
         embed=embed,

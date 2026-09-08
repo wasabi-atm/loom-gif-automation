@@ -28,6 +28,22 @@ class Upload:
     file_id: str
     name: str
     path: str
+    version: str = ""
+
+    @property
+    def versioned_url(self) -> str:
+        """URL carrying the upload's version id as a cache key.
+
+        Overwriting a file keeps its URL, but ImageKit's CDN goes on serving the
+        previously cached bytes — a re-run after a creative change would send
+        prospects the old GIF. A version parameter sidesteps that, and pins each
+        send to the creative that existed when it went out: already-sent emails
+        keep rendering what was actually sent, and new sends pick up the change.
+        """
+        if not self.version:
+            return self.url
+        joiner = "&" if "?" in self.url else "?"
+        return f"{self.url}{joiner}v={self.version}"
 
 
 class ImageKitUploader:
@@ -160,11 +176,19 @@ class ImageKitUploader:
         url = pick("url")
         if not url:
             raise RuntimeError(f"ImageKit response contained no URL: {response!r}")
+
+        version = pick("version_info", "versionInfo")
+        if isinstance(version, dict):
+            version = version.get("id", "")
+        elif version is not None and not isinstance(version, str):
+            version = getattr(version, "id", "") or ""
+
         return Upload(
             url=url,
             file_id=pick("file_id", "fileId") or "",
             name=pick("name") or "",
             path=pick("file_path", "filePath") or "",
+            version=version or "",
         )
 
     # ------------------------------------------------------------------ #

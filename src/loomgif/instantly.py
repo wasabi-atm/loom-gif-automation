@@ -110,6 +110,9 @@ class InstantlyClient:
             if not cursor or not items:
                 return leads
 
+    def get_campaign(self, campaign_id: str) -> dict:
+        return self._request("GET", f"/campaigns/{campaign_id}")
+
     def set_variables(self, lead_id: str, variables: Dict[str, str]) -> dict:
         """Merge custom variables onto a lead (PATCH is a merge, not a replace)."""
         clean = {key: value for key, value in variables.items() if value}
@@ -149,3 +152,76 @@ class InstantlyClient:
         )
         log.info("Pushed media vars to Instantly lead %s (%s)", lead.id, email)
         return lead.id
+
+
+# --------------------------------------------------------------------------- #
+# Pre-launch checks                                                            #
+# --------------------------------------------------------------------------- #
+
+@dataclass
+class Check:
+    ok: bool
+    label: str
+    detail: str = ""
+
+
+def preflight(campaign: dict, variable: str = VAR_GIF) -> List[Check]:
+    """Check a campaign for the settings that silently strip the GIF.
+
+    The campaign skill lists four image-stripping settings to verify by hand
+    before launching. Two are exposed on the campaign object, so they are
+    checked here rather than trusted; the other two live in workspace-level
+    Delivery Optimization and Advanced Deliverability and still need a human.
+
+    Also reports which step carries the image, because Instantly ships two
+    separate settings for forcing step 1 to plain text — a strong hint that the
+    GIF belongs on step 2 or 3.
+    """
+    checks: List[Check] = []
+
+    text_only = bool(campaign.get("text_only"))
+    checks.append(Check(
+        not text_only,
+        "'Send emails as text-only' is off",
+        "ON — images are stripped from every step" if text_only else "",
+    ))
+
+    first_text_only = bool(campaign.get("first_email_text_only"))
+    checks.append(Check(
+        not first_text_only,
+        "'Send first email as text-only' is off",
+        "ON — images are stripped from step 1" if first_text_only else "",
+    ))
+
+    steps = []
+    for sequence in campaign.get("sequences") or []:
+        steps.extend(sequence.get("steps") or [])
+
+    token = "{{" + variable + "}}"
+    carrying = [
+        index
+        for index, step in enumerate(steps, start=1)
+        if any(token in (variant.get("body") or "") for variant in step.get("variants") or [])
+    ]
+
+    if not carrying:
+        checks.append(Check(False, f"A step references {token}", "no step does — the GIF will never render"))
+    else:
+        checks.append(Check(True, f"A step references {token}", f"step {', '.join(map(str, carrying))}"))
+        if 1 in carrying:
+            checks.append(Check(
+                False,
+                "The image is not on step 1",
+                "it is — step 1 is the one most often forced to plain text",
+            ))
+
+    registered = campaign.get("custom_variables") or {}
+    if registered:
+        checks.append(Check(
+            variable in registered,
+            f"'{variable}' is registered on the campaign",
+            "not registered yet — it appears once leads carrying it are uploaded"
+            if variable not in registered else "",
+        ))
+
+    return checks

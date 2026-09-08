@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from . import compose, facecam as facecam_mod, screenshot
+from . import compose, email_embed, facecam as facecam_mod, screenshot
 from .config import Settings
 from .imagekit_client import ImageKitUploader, Upload
 from .instantly import (
@@ -25,6 +25,7 @@ from .instantly import (
 )
 
 log = logging.getLogger(__name__)
+
 
 
 @dataclass
@@ -181,18 +182,22 @@ def _upload_all(
             unique=False,
             overwrite=True,
         )
-        urls[column] = uploaded.url
+        urls[column] = uploaded.versioned_url
         return uploaded
 
-    gif = push("gif", VAR_GIF, ".gif")
-    push("mp4", VAR_VIDEO, ".mp4")
-    push("webm", VAR_VIDEO_WEBM, ".webm")
-    push("poster", VAR_POSTER, "-poster.jpg")
+    cfg = settings.render
+    gif = push("gif", VAR_GIF, ".gif") if cfg.hosts("gif") else None
+    if cfg.hosts("mp4"):
+        push("mp4", VAR_VIDEO, ".mp4")
+    if cfg.hosts("webm"):
+        push("webm", VAR_VIDEO_WEBM, ".webm")
+    if cfg.hosts("poster"):
+        push("poster", VAR_POSTER, "-poster.jpg")
 
-    # A narrower variant for mobile-heavy lists, served by ImageKit rather than
-    # re-encoded locally.
-    if gif:
-        urls[VAR_GIF_SMALL] = uploader.transform(gif.url, "w-400")
+    # Only worth a second variable if the hosted GIF is actually wider than the
+    # email displays it. At the default 400px they are the same file.
+    if gif and cfg.gif_width > email_embed.default_width():
+        urls[VAR_GIF_SMALL] = uploader.transform(gif.versioned_url, f"w-{email_embed.default_width()}")
     return urls
 
 

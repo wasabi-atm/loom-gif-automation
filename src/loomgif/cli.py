@@ -4,6 +4,7 @@
     loomgif batch    --input examples/prospects.csv          # a whole list
     loomgif merge    --campaign campaign.csv --manifest output/manifest.csv
     loomgif snippet                                          # sequence-body HTML
+    loomgif preflight --campaign <id>                        # pre-launch checks
     loomgif doctor                                           # check the setup
 """
 
@@ -18,7 +19,7 @@ from typing import List, Optional
 
 from . import csv_merge, email_embed, facecam
 from .config import ConfigError, Settings, load_settings
-from .instantly import MEDIA_COLUMNS, VAR_GIF, InstantlyClient
+from .instantly import MEDIA_COLUMNS, VAR_GIF, InstantlyClient, preflight
 from .pipeline import Prospect, ProspectResult, read_prospects, run_batch, run_one
 
 
@@ -131,6 +132,12 @@ def cmd_render(args: argparse.Namespace) -> int:
     for column, url in result.urls.items():
         print(f"  {column:<11} {url}")
 
+    # Record it in the same manifest `batch` writes, so a single render can be
+    # merged into a campaign CSV exactly like a batch run.
+    manifest = settings.output_dir / "manifest.csv"
+    csv_merge.upsert_manifest(result.as_manifest_row(), manifest)
+    print(f"\n  manifest    {manifest}")
+
     gif_url = result.urls.get(VAR_GIF)
     if gif_url and not args.no_preview:
         dest = settings.output_dir / prospect.slug / "preview.html"
@@ -159,9 +166,18 @@ def cmd_batch(args: argparse.Namespace) -> int:
 
 
 def cmd_merge(args: argparse.Namespace) -> int:
+    campaign, manifest = Path(args.campaign), Path(args.manifest)
+    for label, path in (("campaign CSV", campaign), ("manifest", manifest)):
+        if not path.exists():
+            print(f"No {label} at {path}", file=sys.stderr)
+            if label == "manifest":
+                print("Run `loomgif batch` or `loomgif render` first — it writes "
+                      "manifest.csv into the output directory.", file=sys.stderr)
+            return 2
+
     report = csv_merge.merge(
-        campaign_csv=Path(args.campaign),
-        manifest_csv=Path(args.manifest),
+        campaign_csv=campaign,
+        manifest_csv=manifest,
         out_dir=Path(args.output or "output"),
         columns=args.columns.split(",") if args.columns else MEDIA_COLUMNS,
     )
@@ -175,13 +191,37 @@ def cmd_merge(args: argparse.Namespace) -> int:
 
 
 def cmd_snippet(args: argparse.Namespace) -> int:
-    print(email_embed.campaign_snippet(with_link=args.link, alt=args.alt, width=args.gif_width or 600))
+    print(email_embed.campaign_snippet(with_link=args.link, alt=args.alt, width=args.gif_width))
     print(
         "\n# Paste into the Instantly sequence body via Code View, not by dragging an image.\n"
         "# Put it on step 2 or 3 — step 1 is often forced to text-only.\n"
         "# Check all four image-stripping settings before launch (see README)."
     )
     return 0
+
+
+def cmd_preflight(args: argparse.Namespace) -> int:
+    """Check a campaign for the settings that silently strip the GIF."""
+    settings = load_settings(None)
+    client = InstantlyClient(settings.instantly)
+    campaign = client.get_campaign(args.campaign)
+
+    print(f"Campaign: {campaign.get('name', args.campaign)}\n")
+    checks = preflight(campaign)
+    for check in checks:
+        mark = "OK  " if check.ok else "FAIL"
+        detail = f"  ({check.detail})" if check.detail else ""
+        print(f"  {mark}  {check.label}{detail}")
+
+    failed = [c for c in checks if not c.ok]
+    print(
+        "\nTwo more settings are workspace-level and not exposed by the API — "
+        "check them by hand:\n"
+        "  - Delivery Optimization must be disabled\n"
+        "  - Advanced Deliverability > 'Always send first email as text-only' must be disabled"
+    )
+    print("\n" + ("Ready to launch." if not failed else f"{len(failed)} problem(s) above."))
+    return 1 if failed else 0
 
 
 def cmd_doctor(args: argparse.Namespace) -> int:
@@ -244,7 +284,7 @@ def build_parser() -> argparse.ArgumentParser:
         sub.add_argument("--width", type=int, help="Canvas width (default 1280)")
         sub.add_argument("--height", type=int, help="Canvas height (default 720)")
         sub.add_argument("--fps", type=int, help="Video frame rate (default 24)")
-        sub.add_argument("--gif-width", type=int, help="GIF width in px (default 600)")
+        sub.add_argument("--gif-width", type=int, help="GIF width in px (default 400)")
         sub.add_argument("--gif-fps", type=int, help="GIF frame rate (default 10; snapped to 25/20/10/5 for exact timing)")
         sub.add_argument("--max-mb", type=float, help="GIF size budget in MB (default 1.8)")
         sub.add_argument("--output", help="Output directory (default ./output)")
@@ -285,8 +325,12 @@ def build_parser() -> argparse.ArgumentParser:
     snippet = subparsers.add_parser("snippet", help="Print the sequence-body HTML")
     snippet.add_argument("--link", action="store_true", help="Wrap in <a> pointing at {{Loom link}}")
     snippet.add_argument("--alt", default=email_embed.DEFAULT_ALT)
-    snippet.add_argument("--gif-width", type=int, default=600)
+    snippet.add_argument("--gif-width", type=int, help="Display width (default: matches GIF_WIDTH)")
     snippet.set_defaults(func=cmd_snippet)
+
+    pre = subparsers.add_parser("preflight", help="Check a campaign for GIF-stripping settings")
+    pre.add_argument("--campaign", required=True, help="Instantly campaign id")
+    pre.set_defaults(func=cmd_preflight)
 
     doctor = subparsers.add_parser("doctor", help="Check dependencies, credentials and assets")
     doctor.add_argument("--facecam")
@@ -302,6 +346,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         return args.func(args)
     except ConfigError as exc:
         print(f"Configuration error: {exc}", file=sys.stderr)
+        return 2
+    except (FileNotFoundError, csv_merge.CsvSpecError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
         return 2
     except KeyboardInterrupt:
         print("\nInterrupted.", file=sys.stderr)

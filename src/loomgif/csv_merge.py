@@ -91,6 +91,25 @@ def write_manifest(rows: List[Dict[str, str]], dest: Path) -> Path:
     return dest
 
 
+def upsert_manifest(row: Dict[str, str], dest: Path) -> Path:
+    """Add or replace one prospect's row in the manifest, keyed on email.
+
+    Lets a single `render` feed `merge` the same way a batch run does, and lets
+    a re-render of one prospect update the manifest without rewriting the rest.
+    """
+    rows: List[Dict[str, str]] = []
+    email = (row.get("Email") or "").strip().lower()
+    if dest.exists():
+        with dest.open(newline="", encoding="utf-8-sig") as handle:
+            rows = [
+                existing
+                for existing in csv.DictReader(handle)
+                if (existing.get("Email") or "").strip().lower() != email
+            ]
+    rows.append(row)
+    return write_manifest(rows, dest)
+
+
 def merge(
     campaign_csv: Path,
     manifest_csv: Path,
@@ -146,9 +165,18 @@ def merge(
         gif_path = out_dir / f"{stem}-gif.csv"
         _write(gif_path, header, with_media)
     if without_media:
-        # No media columns at all here — an empty Gif url renders a broken image.
+        # An empty `Gif url` renders a broken image icon, which is worse than no
+        # image. The campaign CSV carries `Gif url` as one of its own tracking
+        # columns, so it is not enough to skip adding ours — any media column
+        # that is empty for every row here has to be dropped outright.
+        nogif_columns = [
+            column
+            for column in original
+            if column not in MEDIA_COLUMNS
+            or any((row.get(column) or "").strip() for row in without_media)
+        ]
         nogif_path = out_dir / f"{stem}-nogif.csv"
-        _write(nogif_path, original, without_media)
+        _write(nogif_path, nogif_columns, without_media)
 
     return MergeReport(
         gif_path=gif_path,

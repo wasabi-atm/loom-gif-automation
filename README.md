@@ -43,6 +43,7 @@ loomgif batch --input examples/prospects.csv
 | `loomgif batch` | Build media for every row of a CSV, write `output/manifest.csv` |
 | `loomgif merge` | Join hosted URLs onto a campaign CSV, split GIF vs no-GIF |
 | `loomgif snippet` | Print the HTML to paste into the Instantly sequence body |
+| `loomgif preflight` | Check a campaign for the settings that strip the GIF |
 | `loomgif doctor` | Check dependencies, credentials and footage |
 
 Run any of them with `--help` for the full flag list. The useful render flags:
@@ -52,7 +53,7 @@ Run any of them with `--help` for the full flag list. The useful render flags:
 --facecam-start 2.5   # skip a slate at the head of the footage
 --facecam path.mp4    # a specific take, or a directory to rotate between
 --no-pin-nav          # let the site header scroll away instead of pinning it
---gif-width 600       # email display width
+--gif-width 400       # GIF width; the email <img> tag follows it automatically
 --max-mb 1.2          # GIF size budget; the encoder ladders down to fit
 --no-upload           # render locally, skip ImageKit
 --force               # re-screenshot instead of reusing the cached PNG
@@ -113,8 +114,31 @@ Check all of them before launching, or the GIF silently never sends:
 - "Send first email as text-only" strips images from step 1
 - Advanced Deliverability → "Always send first email as text-only" must be **disabled**
 
+Two of the four are exposed on the campaign object, so `preflight` checks them
+rather than trusting them. It also reports which step carries the image:
+
+```bash
+loomgif preflight --campaign <campaign-id>
+```
+
+```
+  OK    'Send emails as text-only' is off
+  OK    'Send first email as text-only' is off
+  FAIL  A step references {{Gif url}}  (no step does — the GIF will never render)
+```
+
+The other two are workspace-level and still need a human; `preflight` says so
+rather than implying it checked them.
+
 That Instantly ships two separate settings for forcing step 1 to plain text is a
-hint. **Put the GIF on step 2 or 3**, where the plain-text feel matters less.
+hint. **Put the GIF on step 2 or 3**, where the plain-text feel matters less —
+`preflight` flags it if the image lands on step 1.
+
+### Variable names with spaces
+
+`{{Gif url}}` has a space in it, which looks wrong but is not: the live
+workspace already runs `{{NEW A 1}}` and `{{SUBJECT EMAIL 1}}` in sent
+campaigns. The capital-first, 20-character rules are what actually matter.
 
 ### Optional: push straight to the leads
 
@@ -313,5 +337,16 @@ key alone — and falls back to the documented REST endpoint if the SDK is absen
 or errors. Both paths are tested against the live account and return identical
 URLs.
 
-ImageKit re-optimises on delivery: a 1.70MB GIF was served at 1.10MB, and
-`?tr=w-400` (the `Gif small` variable) came back at 698KB without a re-encode.
+**Hosted URLs carry a version parameter**, e.g.
+`…/monday-com.gif?v=6a9fcbacead997d09ada14df`. Overwriting a file keeps its URL,
+but ImageKit's CDN goes on serving the previously cached bytes — verified live,
+where the plain URL still returned the old 1.1MB GIF after a new 897KB one had
+been stored. The version key sidesteps that, and pins each send to the creative
+that existed when it went out: already-sent emails keep rendering what was
+actually sent, and new sends pick up the change.
+
+**Only the GIF is uploaded by default** (`UPLOAD_ASSETS=gif`). The MP4, WebM and
+poster are local masters; hosting them multiplies storage for files no prospect
+opens. Set `UPLOAD_ASSETS=all` if you want them on the CDN too.
+
+ImageKit also re-optimises on delivery: the 897KB stored GIF is served at 593KB.

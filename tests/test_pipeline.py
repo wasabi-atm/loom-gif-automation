@@ -93,9 +93,16 @@ class TestEmailEmbed(unittest.TestCase):
     def test_campaign_snippet_uses_variable_and_alt(self):
         html = email_embed.campaign_snippet()
         self.assertIn("{{Gif url}}", html)
-        self.assertIn('width="600"', html)
         self.assertIn("alt=", html)
         self.assertNotIn("<a ", html)
+
+    def test_display_width_matches_the_hosted_gif(self):
+        """A mismatch means the client rescales: narrower looks soft, wider
+        wastes bytes nobody sees."""
+        width = RenderConfig().gif_width
+        html = email_embed.campaign_snippet()
+        self.assertIn(f'width="{width}"', html)
+        self.assertIn(f"max-width:{width}px", html)
 
     def test_link_variant_wraps_in_anchor(self):
         html = email_embed.campaign_snippet(with_link=True)
@@ -346,3 +353,108 @@ class TestBubbleShadow(unittest.TestCase):
         self.assertGreater(cfg.facecam_shadow_blur, 0)
         self.assertLess(cfg.facecam_shadow_blur, cfg.facecam_diameter // 2)
         self.assertLess(cfg.facecam_shadow_offset, cfg.facecam_shadow_blur)
+
+
+class TestHostedUrls(unittest.TestCase):
+    def test_version_is_appended_as_a_cache_key(self):
+        """Overwriting keeps the URL, but ImageKit's CDN serves the previously
+        cached bytes — verified live: the plain URL returned the old 1.1MB file
+        while the versioned one returned the new 593KB."""
+        from loomgif.imagekit_client import Upload
+
+        upload = Upload(url="https://ik.imagekit.io/x/a.gif", file_id="f", name="a.gif",
+                        path="/a.gif", version="abc123")
+        self.assertEqual(upload.versioned_url, "https://ik.imagekit.io/x/a.gif?v=abc123")
+
+    def test_no_version_leaves_the_url_untouched(self):
+        from loomgif.imagekit_client import Upload
+
+        upload = Upload(url="https://ik.imagekit.io/x/a.gif", file_id="f", name="a.gif", path="/a.gif")
+        self.assertEqual(upload.versioned_url, upload.url)
+
+    def test_transform_joins_onto_an_existing_query(self):
+        from loomgif.config import ImageKitConfig
+        from loomgif.imagekit_client import ImageKitUploader
+
+        cfg = ImageKitConfig(url_endpoint="https://ik.imagekit.io/x", public_key="p", private_key="s")
+        uploader = ImageKitUploader.__new__(ImageKitUploader)
+        uploader.cfg = cfg
+        self.assertEqual(
+            uploader.transform("https://ik.imagekit.io/x/a.gif?v=1", "w-400"),
+            "https://ik.imagekit.io/x/a.gif?v=1&tr=w-400",
+        )
+
+
+class TestUploadSelection(unittest.TestCase):
+    def test_only_the_gif_is_hosted_by_default(self):
+        cfg = RenderConfig()
+        self.assertTrue(cfg.hosts("gif"))
+        for asset in ("mp4", "webm", "poster"):
+            self.assertFalse(cfg.hosts(asset), f"{asset} should not be hosted by default")
+
+    def test_all_and_explicit_lists(self):
+        cfg = RenderConfig()
+        cfg.upload_assets = "all"
+        self.assertTrue(all(cfg.hosts(a) for a in ("gif", "mp4", "webm", "poster")))
+        cfg.upload_assets = "gif,poster"
+        self.assertTrue(cfg.hosts("poster"))
+        self.assertFalse(cfg.hosts("mp4"))
+
+
+class TestCampaignPreflight(unittest.TestCase):
+    """Fixtures mirror the real shape returned by GET /api/v2/campaigns/{id}."""
+
+    def _campaign(self, **overrides):
+        campaign = {
+            "name": "GIF test",
+            "text_only": False,
+            "first_email_text_only": False,
+            "custom_variables": {"jobTitle": True, "Gif url": True},
+            "sequences": [{"steps": [
+                {"type": "email", "variants": [{"subject": "One", "body": "<div>Hi</div>"}]},
+                {"type": "email", "variants": [{"subject": "Two",
+                                                "body": '<img src="{{Gif url}}" width="400" alt="x">'}]},
+            ]}],
+        }
+        campaign.update(overrides)
+        return campaign
+
+    def _fail_labels(self, campaign):
+        from loomgif.instantly import preflight
+
+        return [c.label for c in preflight(campaign) if not c.ok]
+
+    def test_a_healthy_campaign_passes_everything(self):
+        self.assertEqual(self._fail_labels(self._campaign()), [])
+
+    def test_text_only_is_caught(self):
+        self.assertIn("'Send emails as text-only' is off", self._fail_labels(self._campaign(text_only=True)))
+
+    def test_first_email_text_only_is_caught(self):
+        self.assertIn(
+            "'Send first email as text-only' is off",
+            self._fail_labels(self._campaign(first_email_text_only=True)),
+        )
+
+    def test_missing_variable_reference_is_caught(self):
+        campaign = self._campaign(sequences=[{"steps": [
+            {"type": "email", "variants": [{"body": "<div>no image here</div>"}]}
+        ]}])
+        self.assertIn("A step references {{Gif url}}", self._fail_labels(campaign))
+
+    def test_image_on_step_one_is_flagged(self):
+        campaign = self._campaign(sequences=[{"steps": [
+            {"type": "email", "variants": [{"body": '<img src="{{Gif url}}">'}]},
+        ]}])
+        self.assertIn("The image is not on step 1", self._fail_labels(campaign))
+
+    def test_unregistered_variable_is_flagged(self):
+        campaign = self._campaign(custom_variables={"jobTitle": True})
+        self.assertIn("'Gif url' is registered on the campaign", self._fail_labels(campaign))
+
+    def test_variables_with_spaces_are_valid_instantly_names(self):
+        """The live workspace already runs {{NEW A 1}} and {{SUBJECT EMAIL 1}},
+        so a space in 'Gif url' is not a problem."""
+        from loomgif.instantly import MEDIA_COLUMNS
+
+        self.assertTrue(any(" " in name for name in MEDIA_COLUMNS))
