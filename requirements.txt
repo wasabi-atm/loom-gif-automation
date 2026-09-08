@@ -1,0 +1,7 @@
+# Core pipeline
+playwright>=1.44          # prospect homepage screenshots (headless Chromium)
+Pillow>=10.0              # circular facecam mask + ring generation
+imagekitio>=5.0           # ImageKit upload SDK
+requests>=2.31            # Instantly V2 API + ImageKit REST fallback
+Jinja2>=3.1               # email HTML templating
+python-dotenv>=1.0        # .env loading

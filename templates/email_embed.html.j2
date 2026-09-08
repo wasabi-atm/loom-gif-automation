@@ -1,0 +1,16 @@
+{#-
+  Instantly sequence-body snippet. Paste via Code View, never by dragging an
+  image in — Instantly warns that pasted images render broken.
+
+  Rules enforced here come from mta-instantly-campaign/references/instantly-csv.md:
+    * alt text is required, because most clients block images by default
+    * no wrapping <a> unless a real click target exists
+    * the email must read completely with images off — the GIF is never load-bearing
+-#}
+{%- if link_url -%}
+<a href="{{ link_url }}" target="_blank" style="text-decoration:none;">
+  <img src="{{ gif_url }}" width="{{ width }}" alt="{{ alt|e }}" style="display:block;width:100%;max-width:{{ width }}px;height:auto;border:0;outline:none;text-decoration:none;" />
+</a>
+{%- else -%}
+<img src="{{ gif_url }}" width="{{ width }}" alt="{{ alt|e }}" style="display:block;width:100%;max-width:{{ width }}px;height:auto;border:0;outline:none;text-decoration:none;" />
+{%- endif %}

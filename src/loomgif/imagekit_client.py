@@ -1,0 +1,169 @@
+"""ImageKit uploads.
+
+Prefers the official `imagekitio` SDK; falls back to the documented REST upload
+endpoint so the pipeline keeps working across SDK major versions.
+"""
+
+from __future__ import annotations
+
+import logging
+import mimetypes
+from dataclasses import dataclass
+from pathlib import Path
+from typing import List, Optional
+from urllib.parse import quote
+
+import requests
+
+from .config import ImageKitConfig
+
+log = logging.getLogger(__name__)
+
+UPLOAD_ENDPOINT = "https://upload.imagekit.io/api/v1/files/upload"
+
+
+@dataclass
+class Upload:
+    url: str
+    file_id: str
+    name: str
+    path: str
+
+
+class ImageKitUploader:
+    def __init__(self, cfg: ImageKitConfig):
+        self.cfg = cfg.require()
+        self._sdk = self._init_sdk()
+
+    def _init_sdk(self):
+        try:
+            from imagekitio import ImageKit  # noqa: WPS433
+        except ImportError:
+            log.debug("imagekitio SDK not installed — using REST upload")
+            return None
+        try:
+            return ImageKit(
+                private_key=self.cfg.private_key,
+                public_key=self.cfg.public_key,
+                url_endpoint=self.cfg.url_endpoint,
+            )
+        except Exception as exc:  # noqa: BLE001
+            log.warning("ImageKit SDK init failed (%s) — using REST upload", exc)
+            return None
+
+    # ------------------------------------------------------------------ #
+
+    def upload(
+        self,
+        path: Path,
+        file_name: Optional[str] = None,
+        folder: Optional[str] = None,
+        tags: Optional[List[str]] = None,
+        unique: bool = False,
+        overwrite: bool = True,
+    ) -> Upload:
+        """Upload a local file and return its public CDN URL.
+
+        `unique=False` + `overwrite=True` keeps URLs stable per prospect, so
+        re-running the pipeline refreshes media without breaking sent emails.
+        """
+        if not path.exists():
+            raise FileNotFoundError(path)
+        file_name = file_name or path.name
+        folder = folder or self.cfg.folder
+        tags = tags or []
+
+        result = self._upload_sdk(path, file_name, folder, tags, unique, overwrite)
+        if result is None:
+            result = self._upload_rest(path, file_name, folder, tags, unique, overwrite)
+        log.info("Uploaded %s -> %s", path.name, result.url)
+        return result
+
+    def _upload_sdk(self, path, file_name, folder, tags, unique, overwrite) -> Optional[Upload]:
+        if self._sdk is None:
+            return None
+        try:
+            files_api = getattr(self._sdk, "files", None)
+            if files_api is not None and hasattr(files_api, "upload"):
+                # imagekitio >= 5 style
+                response = files_api.upload(
+                    file=path,
+                    file_name=file_name,
+                    folder=folder,
+                    tags=tags,
+                    use_unique_file_name=unique,
+                    overwrite_file=overwrite,
+                )
+            else:
+                # Legacy imagekitio 3.x/4.x style
+                from imagekitio.models.UploadFileRequestOptions import UploadFileRequestOptions  # noqa: WPS433
+
+                with open(path, "rb") as handle:
+                    response = self._sdk.upload_file(
+                        file=handle,
+                        file_name=file_name,
+                        options=UploadFileRequestOptions(
+                            folder=folder,
+                            tags=tags,
+                            use_unique_file_name=unique,
+                            overwrite_file=overwrite,
+                        ),
+                    )
+            return self._coerce(response)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("SDK upload failed for %s (%s) — retrying over REST", path.name, exc)
+            return None
+
+    def _upload_rest(self, path, file_name, folder, tags, unique, overwrite) -> Upload:
+        mime = mimetypes.guess_type(file_name)[0] or "application/octet-stream"
+        with open(path, "rb") as handle:
+            response = requests.post(
+                UPLOAD_ENDPOINT,
+                auth=(self.cfg.private_key, ""),
+                files={"file": (file_name, handle, mime)},
+                data={
+                    "fileName": file_name,
+                    "folder": folder,
+                    "useUniqueFileName": "true" if unique else "false",
+                    "overwriteFile": "true" if overwrite else "false",
+                    "tags": ",".join(tags) if tags else "",
+                },
+                timeout=300,
+            )
+        if response.status_code >= 400:
+            raise RuntimeError(f"ImageKit upload failed [{response.status_code}]: {response.text[:400]}")
+        return self._coerce(response.json())
+
+    @staticmethod
+    def _coerce(response) -> Upload:
+        def pick(*names):
+            for name in names:
+                if isinstance(response, dict) and response.get(name) is not None:
+                    return response[name]
+                value = getattr(response, name, None)
+                if value is not None:
+                    return value
+            return None
+
+        url = pick("url")
+        if not url:
+            raise RuntimeError(f"ImageKit response contained no URL: {response!r}")
+        return Upload(
+            url=url,
+            file_id=pick("file_id", "fileId") or "",
+            name=pick("name") or "",
+            path=pick("file_path", "filePath") or "",
+        )
+
+    # ------------------------------------------------------------------ #
+
+    def transform(self, url: str, tr: str) -> str:
+        """Append an ImageKit transformation, e.g. tr='w-600,f-gif'.
+
+        Handy for serving a smaller GIF or a static first frame without
+        re-encoding locally: transform(gif_url, 'w-400').
+        """
+        if not tr:
+            return url
+        joiner = "&" if "?" in url else "?"
+        return f"{url}{joiner}tr={quote(tr, safe='-,:_')}"

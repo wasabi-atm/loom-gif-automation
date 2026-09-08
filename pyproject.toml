@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "loom-gif-automation"
+version = "0.1.0"
+description = "Personalised Loom-style GIFs/videos for Motion The Agency cold outreach"
+requires-python = ">=3.9"
+dependencies = [
+    "playwright>=1.44",
+    "Pillow>=10.0",
+    "imagekitio>=5.0",
+    "requests>=2.31",
+    "Jinja2>=3.1",
+    "python-dotenv>=1.0",
+]
+
+[project.scripts]
+loomgif = "loomgif.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+loomgif = ["../../templates/*.j2"]

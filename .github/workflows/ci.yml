@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.9", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install Pillow Jinja2 requests python-dotenv
+          pip install -e . --no-deps
+
+      # These tests deliberately need no network, no ffmpeg and no credentials.
+      - name: Test
+        run: python -m unittest discover -s tests -v
+
+      - name: Guard against committed secrets
+        run: |
+          if git ls-files --error-unmatch .env 2>/dev/null; then
+            echo "::error::.env is tracked by git — it must stay ignored"
+            exit 1
+          fi
+          if git ls-files -z | grep -zv '^\.env\.example$' | xargs -0 grep -InE 'private_[A-Za-z0-9+/=]{20,}' ; then
+            echo "::error::An ImageKit private key looks committed"
+            exit 1
+          fi

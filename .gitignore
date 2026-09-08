@@ -1,0 +1,26 @@
+# Secrets — never commit
+.env
+.env.local
+*.pem
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# Generated media & run artifacts
+output/
+!output/.gitkeep
+.cache/
+*.log
+
+# Large source footage (keep the folder, not the files)
+assets/facecam/*
+!assets/facecam/.gitkeep
+!assets/facecam/README.md
+
+# macOS
+.DS_Store
