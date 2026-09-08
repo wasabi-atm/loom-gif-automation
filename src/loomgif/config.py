@@ -91,6 +91,10 @@ class RenderConfig:
     # calmer, more readable, and compresses to a much smaller GIF.
     scroll_ratio: float = field(default_factory=lambda: _float("SCROLL_RATIO", 0.5))
 
+    # Lift a solid sticky header into its own pinned layer, the way a real
+    # screen recording keeps it fixed while the body scrolls underneath.
+    pin_sticky_nav: bool = field(default_factory=lambda: os.getenv("PIN_STICKY_NAV", "1") not in ("0", "false", "False"))
+
     # Browser capture
     viewport_width: int = field(default_factory=lambda: _int("VIEWPORT_WIDTH", 1440))
     viewport_height: int = field(default_factory=lambda: _int("VIEWPORT_HEIGHT", 900))
@@ -131,7 +135,7 @@ class Settings:
     instantly: InstantlyConfig = field(default_factory=InstantlyConfig)
     render: RenderConfig = field(default_factory=RenderConfig)
     facecam_path: Path = field(
-        default_factory=lambda: REPO_ROOT / os.getenv("FACECAM_PATH", "assets/facecam/facecam.mp4")
+        default_factory=lambda: REPO_ROOT / os.getenv("FACECAM_PATH", "assets/facecam")
     )
     output_dir: Path = field(default_factory=lambda: REPO_ROOT / os.getenv("OUTPUT_DIR", "output"))
     click_through_url: str = field(

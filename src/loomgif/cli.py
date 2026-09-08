@@ -16,7 +16,7 @@ import sys
 from pathlib import Path
 from typing import List, Optional
 
-from . import csv_merge, email_embed
+from . import csv_merge, email_embed, facecam
 from .config import ConfigError, Settings, load_settings
 from .instantly import MEDIA_COLUMNS, VAR_GIF, InstantlyClient
 from .pipeline import Prospect, ProspectResult, read_prospects, run_batch, run_one
@@ -44,6 +44,8 @@ def _apply_overrides(settings: Settings, args: argparse.Namespace) -> Settings:
     ):
         if value is not None:
             setattr(render, attr, value)
+    if getattr(args, "no_pin_nav", False):
+        render.pin_sticky_nav = False
     if getattr(args, "max_mb", None):
         render.gif_max_bytes = int(args.max_mb * 1_000_000)
     if getattr(args, "output", None):
@@ -214,10 +216,14 @@ def cmd_doctor(args: argparse.Namespace) -> int:
             ok &= label != "ImageKit"
 
     print("\nAssets")
-    facecam = settings.facecam_path
-    print(f"  {'OK ' if facecam.exists() else 'MISSING'}  face cam  {facecam}")
-    if not facecam.exists():
+    clips = facecam.takes(settings.facecam_path)
+    print(f"  {'OK ' if clips else 'MISSING'}  face cam  {settings.facecam_path}")
+    for clip in clips:
+        print(f"           - {clip.name}")
+    if not clips:
         print("           Drop a clip there, or pass --facecam /path/to/clip.mp4")
+    elif len(clips) > 1:
+        print(f"           {len(clips)} takes — each prospect gets one deterministically")
 
     print("\n" + ("Ready." if ok else "Fix the MISSING items above."))
     return 0 if ok else 1
@@ -232,7 +238,7 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     def add_render_opts(sub: argparse.ArgumentParser) -> None:
-        sub.add_argument("--facecam", help="Override the face cam clip for this run")
+        sub.add_argument("--facecam", help="Face cam clip, or a directory of takes to rotate between")
         sub.add_argument("--facecam-start", type=float, help="Seconds into the clip to start from")
         sub.add_argument("--duration", type=float, help="Clip length in seconds (default 6)")
         sub.add_argument("--width", type=int, help="Canvas width (default 1280)")
@@ -246,6 +252,8 @@ def build_parser() -> argparse.ArgumentParser:
         sub.add_argument("--no-gif", action="store_true")
         sub.add_argument("--no-mp4", action="store_true")
         sub.add_argument("--force", action="store_true", help="Re-screenshot even if one is cached")
+        sub.add_argument("--no-pin-nav", action="store_true",
+                         help="Let the site header scroll away instead of pinning it")
 
     render = subparsers.add_parser("render", help="Build media for a single prospect")
     render.add_argument("--website", required=True, help="Prospect homepage, e.g. acme.com")

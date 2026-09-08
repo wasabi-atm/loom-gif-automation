@@ -143,3 +143,52 @@ class TestMerge(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestNavbarLayer(unittest.TestCase):
+    def test_navbar_is_pinned_above_the_scrolling_page(self):
+        cfg = RenderConfig()
+        graph = build_filtergraph(cfg, with_navbar=True)
+        # Scaled to canvas width and pinned at the very top, composited last.
+        self.assertIn(f"[4:v]scale={cfg.width}:-1", graph)
+        self.assertIn("[withring][nav]overlay=0:0", graph)
+        self.assertTrue(graph.endswith("[v]"))
+
+    def test_graph_without_navbar_uses_no_fifth_input(self):
+        graph = build_filtergraph(RenderConfig(), with_navbar=False)
+        self.assertNotIn("[4:v]", graph)
+        self.assertTrue(graph.endswith("[v]"))
+
+
+class TestFacecamRotation(unittest.TestCase):
+    def test_pick_is_deterministic_and_spreads(self):
+        from loomgif import facecam
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            for name in ("sam-facecam-1.mp4", "sam-facecam-2.mp4"):
+                (tmp / name).write_bytes(b"x")
+            (tmp / "notes.txt").write_bytes(b"ignored")
+
+            self.assertEqual(len(facecam.takes(tmp)), 2)  # non-video ignored
+
+            # Same prospect always draws the same take, or a re-run would swap
+            # media that has already been emailed.
+            first = facecam.pick(tmp, "monday-com")
+            self.assertEqual(first, facecam.pick(tmp, "monday-com"))
+
+            chosen = {facecam.pick(tmp, f"prospect-{i}-com").name for i in range(24)}
+            self.assertEqual(len(chosen), 2, "both takes should get used across a list")
+
+    def test_single_file_path_still_works(self):
+        from loomgif import facecam
+
+        with tempfile.TemporaryDirectory() as tmp:
+            clip = Path(tmp) / "only.mp4"
+            clip.write_bytes(b"x")
+            self.assertEqual(facecam.pick(clip, "anything"), clip)
+
+    def test_missing_path_returns_none(self):
+        from loomgif import facecam
+
+        self.assertIsNone(facecam.pick(Path("/nope/missing"), "x"))

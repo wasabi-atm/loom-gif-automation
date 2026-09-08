@@ -1,6 +1,10 @@
 # Face cam footage
 
-Drop the talking-head clip here as `facecam.mp4` (the default `FACECAM_PATH`).
+Drop talking-head clips here. `FACECAM_PATH` defaults to this **directory**, so
+every clip in it joins the rotation: each prospect is assigned one
+deterministically from a hash of their domain, giving a list variety while a
+re-run never swaps media that has already gone out.
+
 Real files are gitignored — only this README and `.gitkeep` are tracked.
 
 ## What records well
@@ -22,7 +26,7 @@ Real files are gitignored — only this README and `.gitkeep` are tracked.
 Keep several and select per campaign:
 
 ```bash
-loomgif batch --input list.csv --facecam assets/facecam/sam-wave.mp4
+loomgif batch --input list.csv --facecam assets/facecam/sam-facecam-1.mp4
 ```
 
 Or per prospect, with a `Facecam` column in the input CSV holding a path.

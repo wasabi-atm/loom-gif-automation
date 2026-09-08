@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from . import compose, screenshot
+from . import compose, facecam as facecam_mod, screenshot
 from .config import Settings
 from .imagekit_client import ImageKitUploader, Upload
 from .instantly import (
@@ -114,14 +114,25 @@ def run_one(
 
     try:
         shot = work / "screenshot.png"
+        navbar = work / "navbar.png"
         if force or not shot.exists():
-            screenshot.capture(prospect.website, shot, cfg)
+            capture = screenshot.capture(prospect.website, shot, cfg)
+            navbar = capture.navbar
         else:
             log.info("Reusing cached screenshot %s", shot)
+            navbar = navbar if navbar.exists() else None
         result.local["screenshot"] = shot
+        if navbar:
+            result.local["navbar"] = navbar
 
-        facecam = Path(prospect.facecam).expanduser() if prospect.facecam else settings.facecam_path
-        render = compose.render(shot, facecam, work / prospect.slug, cfg, make_mp4=make_mp4)
+        source = Path(prospect.facecam).expanduser() if prospect.facecam else settings.facecam_path
+        facecam = facecam_mod.pick(source, prospect.slug)
+        if facecam is None:
+            raise FileNotFoundError(
+                f"No face cam clip found at {source}. Drop one in assets/facecam/ "
+                "or pass --facecam /path/to/clip.mp4 (a directory works too)."
+            )
+        render = compose.render(shot, facecam, work / prospect.slug, cfg, make_mp4=make_mp4, navbar=navbar)
         result.local["poster"] = render.poster
         for label, path in (("webm", render.webm), ("mp4", render.mp4)):
             if path:

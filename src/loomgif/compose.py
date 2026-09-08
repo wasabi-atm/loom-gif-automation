@@ -91,9 +91,10 @@ class RenderResult:
     gif: Optional[Path] = None
 
 
-def build_filtergraph(cfg: RenderConfig) -> str:
-    """Screenshot scrolls with an ease-in-out; face cam is cropped square, made
-    circular via alphamerge, then the ring is laid over the seam."""
+def build_filtergraph(cfg: RenderConfig, with_navbar: bool = False) -> str:
+    """Screenshot scrolls with an ease-in-out; the site's sticky nav (if we lifted
+    one) stays pinned at the top; face cam is cropped square, made circular via
+    alphamerge, then the ring is laid over the seam."""
     w, h, d = cfg.width, cfg.height, cfg.facecam_diameter
     margin = cfg.facecam_margin
     duration = max(cfg.duration, 0.1)
@@ -108,7 +109,7 @@ def build_filtergraph(cfg: RenderConfig) -> str:
     travel = f"(ih-oh)*{cfg.scroll_ratio}"
     scroll_y = f"'{travel}*({p}*{p}*(3-2*{p}))'"
 
-    return (
+    graph = (
         # Background: fit page to canvas width, guarantee it is at least canvas tall,
         # then crop a moving window down the page.
         f"[0:v]scale={w}:-2:flags=lanczos,setsar=1,"
@@ -119,8 +120,18 @@ def build_filtergraph(cfg: RenderConfig) -> str:
         f"crop={d}:{d},setsar=1,format=rgba[fcraw];"
         f"[fcraw][2:v]alphamerge[fc];"
         f"[bg][fc]overlay={bubble_x}:{bubble_y}:format=auto[withcam];"
-        f"[withcam][3:v]overlay={ring_x}:{ring_y}:format=auto,format=yuv420p[v]"
+        f"[withcam][3:v]overlay={ring_x}:{ring_y}:format=auto[withring];"
     )
+    if with_navbar:
+        # Pinned last so it sits above everything except nothing — a real sticky
+        # header covers the page, but the face cam bubble is bottom-left anyway.
+        graph += (
+            f"[4:v]scale={w}:-1:flags=lanczos[nav];"
+            f"[withring][nav]overlay=0:0:format=auto,format=yuv420p[v]"
+        )
+    else:
+        graph += "[withring]format=yuv420p[v]"
+    return graph
 
 
 def render(
@@ -130,6 +141,7 @@ def render(
     cfg: RenderConfig,
     make_mp4: bool = True,
     keep_audio: bool = True,
+    navbar: Optional[Path] = None,
 ) -> RenderResult:
     """Render the composite to WebM (+ optional MP4) and pull a poster frame."""
     ensure_ffmpeg()
@@ -152,7 +164,8 @@ def render(
         shadow_px=SHADOW_PAD,
     )
 
-    graph = build_filtergraph(cfg)
+    with_navbar = navbar is not None and navbar.exists()
+    graph = build_filtergraph(cfg, with_navbar=with_navbar)
     audio = keep_audio and has_audio(facecam)
 
     def inputs() -> List[str]:
@@ -162,7 +175,7 @@ def render(
             "-stream_loop", "-1", "-ss", f"{cfg.facecam_start}", "-t", f"{cfg.duration}", "-i", str(facecam),
             "-i", str(mask),
             "-i", str(ring),
-        ]
+        ] + (["-i", str(navbar)] if with_navbar else [])
 
     def encode(dest: Path, video_args: List[str], audio_args: List[str]) -> Path:
         cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", *inputs(),

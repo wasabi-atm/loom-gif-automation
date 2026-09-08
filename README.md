@@ -21,7 +21,7 @@ cp .env.example .env            # then fill in the ImageKit keys
 loomgif doctor                  # checks binaries, credentials, footage
 ```
 
-Drop the face cam clip at `assets/facecam/facecam.mp4` (see
+Drop your face cam clips in `assets/facecam/` (see
 [`assets/facecam/README.md`](assets/facecam/README.md) for how to shoot it), then:
 
 ```bash
@@ -50,7 +50,8 @@ Run any of them with `--help` for the full flag list. The useful render flags:
 ```bash
 --duration 6          # clip length in seconds
 --facecam-start 2.5   # skip a slate at the head of the footage
---facecam path.mp4    # a different take for this run
+--facecam path.mp4    # a specific take, or a directory to rotate between
+--no-pin-nav          # let the site header scroll away instead of pinning it
 --gif-width 600       # email display width
 --max-mb 1.2          # GIF size budget; the encoder ladders down to fit
 --no-upload           # render locally, skip ImageKit
@@ -148,6 +149,7 @@ output/
   manifest.csv              one row per prospect: URLs + status
   obrizum-com/
     screenshot.png          full-page capture (cached; --force to refresh)
+    navbar.png              the site's sticky header, lifted out (when solid)
     obrizum-com.mp4         H.264 master
     obrizum-com.webm        VP9 master (if your ffmpeg has libvpx)
     obrizum-com.gif         email-embeddable, size-capped
@@ -165,11 +167,49 @@ output/
 2. The face cam is cover-cropped to a square, resized to the bubble, and made
    circular with `alphamerge` against a Pillow-generated anti-aliased mask.
 3. A ring-and-shadow PNG is laid over the seam.
+4. If the site has a solid sticky header, it is composited **pinned at the top**.
 
 Masks are generated once at 4x and cached in `output/.overlays/`.
 
 Geometry is env-tunable: `FACECAM_DIAMETER_RATIO` (0.32 of canvas height),
 `FACECAM_MARGIN_RATIO`, `FACECAM_RING_PX`, `FACECAM_RING_COLOR`, `SCROLL_RATIO`.
+
+### The site's navigation
+
+A real screen recording keeps the site's sticky header pinned while the body
+scrolls underneath. Baking it into the scrolling image instead makes it slide
+away after a second, which is the first thing that reads as fake.
+
+So the header is lifted into its own layer: captured after a short scroll (so it
+takes its *scrolled* appearance, which is what the viewer sees for all but the
+opening moment), hidden on the page, and composited back at `y=0`.
+
+This only happens for **solid** headers. A transparent one is left in the page to
+scroll away naturally — pinning it would freeze a band of hero content over the
+moving page. The log says which path a site took:
+
+```
+Pinned sticky nav (72px tall) as its own layer          # monday.com
+Sticky nav is transparent — leaving it in the page      # motiontheagency.com
+```
+
+`--no-pin-nav` (or `PIN_STICKY_NAV=0`) forces the header to scroll with the page.
+
+Overlays that would smear across a full-page capture — consent bars, chat
+bubbles, bottom-anchored bars, full-screen modals — are removed, but **only if
+they currently overlay the viewport**. Scroll-driven sticky *sections* further
+down the page are real content and are left alone.
+
+### Face cam takes
+
+`FACECAM_PATH` can be a single clip or a **directory of takes**. With a
+directory, each prospect gets one deterministically from a hash of their domain,
+so a list gets variety while a re-run never swaps media that has already been
+emailed.
+
+```bash
+loomgif doctor        # lists the takes it can see
+```
 
 ### GIF sizing
 
