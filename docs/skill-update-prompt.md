@@ -63,6 +63,47 @@ CDN cache key, so the URL for a given prospect changes only when their creative
 actually changes. It matters here because it means a re-render before send is
 safe, and an already-sent email keeps rendering what was sent.
 
+## Replace the Apify screenshot step
+
+`references/pipeline.md` currently reaches for Apify to capture prospect sites.
+That breaks in practice: the run has the screenshot sitting in an Apify
+key-value store and no way to get the bytes to where the compositing happens,
+because `api.apify.com` is not reachable from the tool environment and a signed
+store link is not a URL the fetch tools will open.
+
+The repo captures with Playwright instead, in the same process that composites,
+so the bytes never have to move:
+
+```bash
+loomgif shot --website acme.com --out acme.png   # capture only
+loomgif render --website acme.com                # capture + composite + host
+```
+
+Point the skill at those and drop the Apify screenshot step. Keep Apify for the
+LinkedIn scraping in step 3 — that part works and this changes nothing about it.
+
+State plainly that the GIF pipeline runs in Claude Code, where a browser and
+ffmpeg exist, not in a chat container. That is the actual constraint, and a run
+that ignores it fails at the last step with everything else already done.
+
+For an environment that genuinely cannot run a browser, the compositor accepts a
+capture from anywhere:
+
+```bash
+loomgif render --website acme.com --screenshot <path-or-url>
+```
+
+A `Screenshot` column in the batch CSV does the same per row. Note the cost: the
+site's sticky header can only be pinned when the capture is ours, because
+lifting it needs the live DOM.
+
+## Redirects
+
+Add a line to the data rules: put the **resolved** domain in `Website`.
+`jaama.co.uk` redirects to `jaama.com`. The pipeline resolves this itself and
+files the prospect under the destination, but a mismatch between the CSV and the
+real domain makes the tracking columns harder to read later.
+
 ## What to change, not just add
 
 - The GIF is **5 seconds**, bound to the length of the face cam take. If any

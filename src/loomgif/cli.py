@@ -3,6 +3,7 @@
     loomgif render   --website acme.com --email a@acme.com   # one prospect
     loomgif batch    --input examples/prospects.csv          # a whole list
     loomgif merge    --campaign campaign.csv --manifest output/manifest.csv
+    loomgif shot     --website acme.com                      # screenshot only
     loomgif snippet                                          # sequence-body HTML
     loomgif preflight --campaign <id>                        # pre-launch checks
     loomgif doctor                                           # check the setup
@@ -17,7 +18,7 @@ import sys
 from pathlib import Path
 from typing import List, Optional
 
-from . import csv_merge, email_embed, facecam
+from . import csv_merge, email_embed, facecam, screenshot
 from .config import ConfigError, Settings, load_settings
 from .instantly import MEDIA_COLUMNS, VAR_GIF, InstantlyClient, preflight
 from .pipeline import Prospect, ProspectResult, read_prospects, run_batch, run_one
@@ -113,6 +114,7 @@ def cmd_render(args: argparse.Namespace) -> int:
         first_name=args.first_name or "",
         company=args.company or "",
         link_url=args.link or "",
+        screenshot=args.screenshot or "",
     )
     result = run_one(
         prospect,
@@ -121,6 +123,7 @@ def cmd_render(args: argparse.Namespace) -> int:
         make_mp4=not args.no_mp4,
         make_gif=not args.no_gif,
         force=args.force,
+        resolve_redirects=not args.no_follow_redirects,
     )
     if result.status == "failed":
         print(f"Failed: {result.note}", file=sys.stderr)
@@ -161,6 +164,7 @@ def cmd_batch(args: argparse.Namespace) -> int:
         make_mp4=not args.no_mp4,
         make_gif=not args.no_gif,
         force=args.force,
+        resolve_redirects=not args.no_follow_redirects,
     )
     return _report(results, settings, push=args.push, campaign=args.campaign)
 
@@ -197,6 +201,31 @@ def cmd_snippet(args: argparse.Namespace) -> int:
         "# Put it on step 2 or 3 — step 1 is often forced to text-only.\n"
         "# Check all four image-stripping settings before launch (see README)."
     )
+    return 0
+
+
+def cmd_shot(args: argparse.Namespace) -> int:
+    """Capture a prospect's page and stop — no face cam, no ffmpeg, no upload.
+
+    Exists so the screenshot stage can be driven on its own, replacing an
+    external screenshot service with the same code the full pipeline uses.
+    """
+    settings = _apply_overrides(load_settings(None), args)
+    url = args.website if args.no_follow_redirects else screenshot.resolve_final_url(args.website)
+    dest = Path(args.out) if args.out else settings.output_dir / screenshot.slug_for(url) / "screenshot.png"
+
+    capture = screenshot.capture(url, dest, settings.render)
+    size = capture.page.stat().st_size
+    from PIL import Image  # noqa: WPS433
+
+    with Image.open(capture.page) as image:
+        dimensions = f"{image.width}x{image.height}"
+
+    print(f"  {capture.page}")
+    print(f"  {dimensions}, {size / 1e6:.1f} MB")
+    if capture.navbar:
+        print(f"  sticky nav lifted: {capture.navbar}")
+    print(f"\n  Feed it to a render with:\n    loomgif render --website {url} --screenshot {capture.page}")
     return 0
 
 
@@ -297,6 +326,8 @@ def build_parser() -> argparse.ArgumentParser:
         sub.add_argument("--force", action="store_true", help="Re-screenshot even if one is cached")
         sub.add_argument("--no-pin-nav", action="store_true",
                          help="Let the site header scroll away instead of pinning it")
+        sub.add_argument("--no-follow-redirects", action="store_true",
+                         help="Screenshot the URL as given instead of its redirect target")
 
     render = subparsers.add_parser("render", help="Build media for a single prospect")
     render.add_argument("--website", required=True, help="Prospect homepage, e.g. acme.com")
@@ -304,6 +335,10 @@ def build_parser() -> argparse.ArgumentParser:
     render.add_argument("--first-name")
     render.add_argument("--company")
     render.add_argument("--link", help="Click-through URL if a real Loom exists")
+    render.add_argument("--screenshot",
+                        help="Use this screenshot (local path or URL) instead of capturing one. "
+                             "Lets an environment without Chromium composite from an Apify or "
+                             "scraper capture.")
     render.add_argument("--alt", default=email_embed.DEFAULT_ALT, help="Image alt text (required in the email)")
     render.add_argument("--no-preview", action="store_true")
     add_render_opts(render)
@@ -312,6 +347,8 @@ def build_parser() -> argparse.ArgumentParser:
     batch = subparsers.add_parser("batch", help="Build media for every row in a CSV")
     batch.add_argument("--input", required=True, help="CSV with Email and Website columns")
     batch.add_argument("--limit", type=int, help="Only process the first N rows (handy for a test run)")
+    batch.add_argument("--screenshots", action="store_true",
+                       help="(informational) a Screenshot column in the CSV supplies captures per row")
     batch.add_argument("--push", action="store_true",
                        help="Also write the URLs onto Instantly leads via the API")
     batch.add_argument("--campaign", help="Instantly campaign id to scope --push to")
@@ -330,6 +367,16 @@ def build_parser() -> argparse.ArgumentParser:
     snippet.add_argument("--alt", default=email_embed.DEFAULT_ALT)
     snippet.add_argument("--gif-width", type=int, help="Display width (default: matches GIF_WIDTH)")
     snippet.set_defaults(func=cmd_snippet)
+
+    shot = subparsers.add_parser("shot", help="Capture a prospect page and stop")
+    shot.add_argument("--website", required=True)
+    shot.add_argument("--out", help="Destination PNG (default: output/<slug>/screenshot.png)")
+    shot.add_argument("--width", type=int, help="Viewport width override")
+    shot.add_argument("--height", type=int)
+    shot.add_argument("--output", help="Output directory")
+    shot.add_argument("--no-pin-nav", action="store_true")
+    shot.add_argument("--no-follow-redirects", action="store_true")
+    shot.set_defaults(func=cmd_shot)
 
     pre = subparsers.add_parser("preflight", help="Check a campaign for GIF-stripping settings")
     pre.add_argument("--campaign", required=True, help="Instantly campaign id")

@@ -43,6 +43,7 @@ loomgif batch --input examples/prospects.csv
 | `loomgif batch` | Build media for every row of a CSV, write `output/manifest.csv` |
 | `loomgif merge` | Join hosted URLs onto a campaign CSV, split GIF vs no-GIF |
 | `loomgif snippet` | Print the HTML to paste into the Instantly sequence body |
+| `loomgif shot` | Capture a prospect page and stop — the screenshot stage alone |
 | `loomgif preflight` | Check a campaign for the settings that strip the GIF |
 | `loomgif doctor` | Check dependencies, credentials and footage |
 
@@ -153,6 +154,43 @@ loomgif batch --input prospects.csv --push --campaign <campaign-id>
 Needs `INSTANTLY_API_KEY` in `.env`. The CSV path stays the default because it
 matches how the campaign skill already hands work over.
 
+## Screenshots from elsewhere
+
+The screenshot is the only stage that needs a browser. Everything after it —
+compositing, GIF, hosting, CSV — is ffmpeg and Python. So a capture can come
+from outside, which is what makes the pipeline runnable in environments where
+Chromium is unavailable:
+
+```bash
+# a saved PNG, an S3 object, an Apify key-value-store record — anything
+loomgif render --website acme.com --screenshot https://.../screenshot.png
+loomgif render --website acme.com --screenshot ./acme.png
+```
+
+A `Screenshot` column in the batch CSV does the same per row.
+
+The trade-off is the sticky navigation. Lifting it needs the live DOM, so a
+supplied image keeps whatever header it was captured with and that header
+scrolls away with the page instead of staying pinned. The log says so when it
+happens.
+
+Supplied images are trimmed to the same aspect cap as our own captures, since a
+15,000px page scrolled inside five seconds is an unreadable blur.
+
+To drive just the capture stage with this repo's own browser instead of an
+external service:
+
+```bash
+loomgif shot --website acme.com --out acme.png
+```
+
+## Redirects
+
+`jaama.co.uk` redirects to `jaama.com`. Left alone, every run burns a redirect
+and files the prospect under a domain they do not use, so the cache key and the
+output folder are both wrong. Redirects are resolved before capture and the slug
+follows the destination. `--no-follow-redirects` opts out.
+
 ## Input CSV
 
 Only `Email` and `Website` are required. Column names are matched
@@ -163,8 +201,9 @@ Email,First name,Company name,Website
 sam@obrizum.com,Sam,Obrizum,https://obrizum.com
 ```
 
-Optional columns: `Facecam` (path to a different clip for that prospect) and
-`Loom link` (a real click-through URL).
+Optional columns: `Facecam` (path to a different clip for that prospect),
+`Screenshot` (a path or URL to a capture taken elsewhere) and `Loom link`
+(a real click-through URL).
 
 ## Output
 

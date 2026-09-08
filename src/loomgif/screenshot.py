@@ -8,10 +8,13 @@ from __future__ import annotations
 
 import logging
 import re
+import shutil
 import time
 from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
+
+import requests
 
 from .config import RenderConfig
 
@@ -300,3 +303,102 @@ def capture_or_none(url: str, dest: Path, cfg: RenderConfig) -> Optional["Captur
     except Exception as exc:  # noqa: BLE001
         log.error("Screenshot failed for %s: %s", url, exc)
         return None
+
+
+# --------------------------------------------------------------------------- #
+# Screenshots from somewhere other than our own browser                        #
+# --------------------------------------------------------------------------- #
+
+#: Cap a supplied image's aspect the way `max_capture_height` caps our own
+#: capture — expressed as a ratio so it holds at any resolution.
+MAX_ASPECT = 2.5
+
+MAX_DOWNLOAD_BYTES = 60 * 1024 * 1024
+
+
+def acquire(source: str, dest: Path, cfg: RenderConfig) -> Capture:
+    """Use a screenshot produced elsewhere — Apify, a scraper, a saved PNG.
+
+    Environments that cannot run Chromium can still composite: the screenshot
+    step is the only part of the pipeline that needs a browser, so accepting one
+    from outside removes that dependency entirely.
+
+    The trade-off is the sticky navigation. Lifting it needs the live DOM, so a
+    supplied image keeps whatever header it was captured with, scrolling with
+    the page rather than pinned.
+    """
+    dest.parent.mkdir(parents=True, exist_ok=True)
+
+    if re.match(r"^https?://", source, re.I):
+        _download(source, dest)
+    else:
+        local = Path(source).expanduser()
+        if not local.exists():
+            raise FileNotFoundError(f"Screenshot not found: {local}")
+        if local.resolve() != dest.resolve():
+            shutil.copyfile(local, dest)
+
+    _trim_tall(dest, cfg)
+    log.info("Using supplied screenshot %s", dest)
+    return Capture(page=dest, navbar=None, navbar_height=0)
+
+
+def _download(url: str, dest: Path) -> None:
+    response = requests.get(url, stream=True, timeout=120, allow_redirects=True)
+    if response.status_code >= 400:
+        raise RuntimeError(f"Screenshot download failed [{response.status_code}]: {url[:120]}")
+
+    content_type = (response.headers.get("content-type") or "").lower()
+    if content_type and not content_type.startswith("image/"):
+        raise RuntimeError(f"Expected an image, got {content_type!r} from {url[:120]}")
+
+    written = 0
+    with dest.open("wb") as handle:
+        for chunk in response.iter_content(chunk_size=1024 * 256):
+            written += len(chunk)
+            if written > MAX_DOWNLOAD_BYTES:
+                raise RuntimeError(f"Screenshot exceeds {MAX_DOWNLOAD_BYTES // 1_000_000}MB: {url[:120]}")
+            handle.write(chunk)
+    log.info("Downloaded screenshot (%.1f MB)", written / 1e6)
+
+
+def _trim_tall(path: Path, cfg: RenderConfig) -> None:
+    """Crop an over-tall page to the top.
+
+    Full-page captures of marketing sites run to 15,000px. Scrolling all of it
+    inside a five-second clip is an unreadable blur, and our own capture is
+    already capped, so a supplied one is held to the same shape.
+    """
+    from PIL import Image  # noqa: WPS433
+
+    with Image.open(path) as image:
+        width, height = image.size
+        limit = int(width * MAX_ASPECT)
+        if height <= limit:
+            return
+        cropped = image.crop((0, 0, width, limit))
+        cropped.save(path)
+    log.info("Trimmed supplied screenshot %dpx -> %dpx tall", height, limit)
+
+
+def resolve_final_url(url: str, timeout: int = 12) -> str:
+    """Follow redirects once so the slug and cache key match the real site.
+
+    jaama.co.uk redirects to jaama.com: without this every run burns a redirect
+    and files the prospect under a domain they do not actually use. Fails open —
+    a resolution problem should not cost the render.
+    """
+    url = normalise_url(url)
+    try:
+        response = requests.head(url, allow_redirects=True, timeout=timeout)
+        if response.status_code >= 400:
+            response = requests.get(url, allow_redirects=True, timeout=timeout, stream=True)
+            response.close()
+        final = response.url or url
+    except Exception as exc:  # noqa: BLE001
+        log.debug("Could not resolve redirects for %s: %s", url, exc)
+        return url
+
+    if slug_for(final) != slug_for(url):
+        log.info("%s redirects to %s", urlparse(url).netloc, urlparse(final).netloc)
+    return final

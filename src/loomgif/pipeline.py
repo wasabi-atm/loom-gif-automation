@@ -39,10 +39,24 @@ class Prospect:
     company: str = ""
     facecam: str = ""
     link_url: str = ""
+    screenshot: str = ""   # path or URL to a screenshot captured elsewhere
+
+    #: Set once redirects have been resolved, so it is done at most once.
+    _resolved: str = ""
 
     @property
     def slug(self) -> str:
-        return screenshot.slug_for(self.website)
+        return screenshot.slug_for(self._resolved or self.website)
+
+    def resolve(self, follow_redirects: bool = True) -> str:
+        """The URL to screenshot, after following redirects."""
+        if not self._resolved:
+            self._resolved = (
+                screenshot.resolve_final_url(self.website)
+                if follow_redirects
+                else screenshot.normalise_url(self.website)
+            )
+        return self._resolved
 
 
 @dataclass
@@ -56,7 +70,7 @@ class ProspectResult:
     def as_manifest_row(self) -> Dict[str, str]:
         row = {
             "Email": self.prospect.email,
-            "Website": self.prospect.website,
+            "Website": self.prospect._resolved or self.prospect.website,
             "Status": self.status,
             "Note": self.note,
         }
@@ -77,6 +91,8 @@ def read_prospects(path: Path) -> List[Prospect]:
         "company name": "company",
         "company": "company",
         "facecam": "facecam",
+        "screenshot": "screenshot",
+        "screenshot url": "screenshot",
         "loom link": "link_url",
         "link": "link_url",
     }
@@ -109,18 +125,26 @@ def run_one(
     make_mp4: bool = True,
     make_gif: bool = True,
     force: bool = False,
+    resolve_redirects: bool = True,
 ) -> ProspectResult:
     """Screenshot, composite, GIF and host the media for a single prospect."""
     result = ProspectResult(prospect=prospect)
     cfg = settings.render
+    if not prospect.screenshot:
+        prospect.resolve(resolve_redirects)
     work = settings.output_dir / prospect.slug
     work.mkdir(parents=True, exist_ok=True)
 
     try:
         shot = work / "screenshot.png"
         navbar = work / "navbar.png"
-        if force or not shot.exists():
-            capture = screenshot.capture(prospect.website, shot, cfg)
+        if prospect.screenshot:
+            # Supplied from outside — Apify, a scraper, a saved PNG. No browser
+            # needed, but no sticky nav either; lifting it needs the live DOM.
+            capture = screenshot.acquire(prospect.screenshot, shot, cfg)
+            navbar = capture.navbar
+        elif force or not shot.exists():
+            capture = screenshot.capture(prospect.resolve(resolve_redirects), shot, cfg)
             navbar = capture.navbar
         else:
             log.info("Reusing cached screenshot %s", shot)
@@ -222,6 +246,7 @@ def run_batch(
     make_mp4: bool = True,
     make_gif: bool = True,
     force: bool = False,
+    resolve_redirects: bool = True,
 ) -> List[ProspectResult]:
     uploader = ImageKitUploader(settings.imagekit) if upload else None
     results: List[ProspectResult] = []
@@ -237,6 +262,7 @@ def run_batch(
                 make_mp4=make_mp4,
                 make_gif=make_gif,
                 force=force,
+                resolve_redirects=resolve_redirects,
             )
         )
     return results

@@ -539,3 +539,89 @@ class TestRotationStability(unittest.TestCase):
             (tmp / "2026-09" / "shoot.mp4").write_bytes(b"x")
             (tmp / "notes.md").write_bytes(b"ignored")
             self.assertEqual([p.name for p in facecam.takes(tmp)], ["shoot.mp4"])
+
+
+class TestSuppliedScreenshot(unittest.TestCase):
+    """The screenshot step is the only part that needs a browser. Accepting one
+    from outside lets an Apify- or scraper-driven environment composite."""
+
+    def _png(self, path: Path, size):
+        from PIL import Image
+
+        Image.new("RGB", size, "white").save(path)
+        return path
+
+    def test_local_file_is_copied_and_navbar_is_not_lifted(self):
+        from loomgif import screenshot
+        from loomgif.config import RenderConfig
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            src = self._png(tmp / "src.png", (1200, 2000))
+            capture = screenshot.acquire(str(src), tmp / "out" / "screenshot.png", RenderConfig())
+            self.assertTrue(capture.page.exists())
+            # Lifting the sticky nav needs the live DOM, which we do not have.
+            self.assertIsNone(capture.navbar)
+            self.assertEqual(capture.navbar_height, 0)
+
+    def test_over_tall_supplied_images_are_trimmed(self):
+        from PIL import Image
+
+        from loomgif import screenshot
+        from loomgif.config import RenderConfig
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            src = self._png(tmp / "tall.png", (1000, 15000))   # a real marketing page
+            capture = screenshot.acquire(str(src), tmp / "out.png", RenderConfig())
+            with Image.open(capture.page) as image:
+                self.assertEqual(image.size, (1000, int(1000 * screenshot.MAX_ASPECT)))
+
+    def test_reasonable_images_are_left_alone(self):
+        from PIL import Image
+
+        from loomgif import screenshot
+        from loomgif.config import RenderConfig
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            src = self._png(tmp / "ok.png", (1200, 2400))
+            capture = screenshot.acquire(str(src), tmp / "out.png", RenderConfig())
+            with Image.open(capture.page) as image:
+                self.assertEqual(image.size, (1200, 2400))
+
+    def test_missing_file_is_reported_clearly(self):
+        from loomgif import screenshot
+        from loomgif.config import RenderConfig
+
+        with self.assertRaises(FileNotFoundError):
+            screenshot.acquire("/nope/missing.png", Path("/tmp/x.png"), RenderConfig())
+
+    def test_csv_supplies_screenshots_per_row(self):
+        from loomgif.pipeline import read_prospects
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "p.csv"
+            path.write_text(
+                "Email,Website,Screenshot\n"
+                "a@x.com,x.com,https://api.apify.com/v2/key-value-stores/k/records/shot\n",
+                encoding="utf-8",
+            )
+            prospect = read_prospects(path)[0]
+            self.assertTrue(prospect.screenshot.startswith("https://api.apify.com"))
+
+
+class TestRedirectResolution(unittest.TestCase):
+    def test_slug_follows_the_resolved_url(self):
+        from loomgif.pipeline import Prospect
+
+        prospect = Prospect(email="a@jaama.com", website="jaama.co.uk")
+        self.assertEqual(prospect.slug, "jaama-co-uk")
+        prospect._resolved = "https://jaama.com"
+        self.assertEqual(prospect.slug, "jaama-com")
+
+    def test_resolution_can_be_skipped(self):
+        from loomgif.pipeline import Prospect
+
+        prospect = Prospect(email="a@x.com", website="jaama.co.uk")
+        self.assertEqual(prospect.resolve(follow_redirects=False), "https://jaama.co.uk")
