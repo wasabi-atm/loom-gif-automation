@@ -92,7 +92,7 @@ class TestFacecamMask(unittest.TestCase):
 class TestEmailEmbed(unittest.TestCase):
     def test_campaign_snippet_uses_variable_and_alt(self):
         html = email_embed.campaign_snippet()
-        self.assertIn("{{Gif url}}", html)
+        self.assertIn("{{GifUrl}}", html)
         self.assertIn("alt=", html)
         self.assertNotIn("<a ", html)
 
@@ -168,7 +168,7 @@ class TestMerge(unittest.TestCase):
             self.assertEqual(rows[0][VAR_GIF], "https://ik/a.gif")
             self.assertEqual(rows[0]["Email1Body"], "line one\n\nline two")  # newlines survive
 
-            # The no-GIF file must not carry an empty Gif url — that renders a broken image.
+            # The no-GIF file must not carry an empty GifUrl — that renders a broken image.
             with report.nogif_path.open(encoding="utf-8") as handle:
                 self.assertNotIn(VAR_GIF, csv.DictReader(handle).fieldnames)
 
@@ -408,11 +408,11 @@ class TestCampaignPreflight(unittest.TestCase):
             "name": "GIF test",
             "text_only": False,
             "first_email_text_only": False,
-            "custom_variables": {"jobTitle": True, "Gif url": True},
+            "custom_variables": {"jobTitle": True, "GifUrl": True},
             "sequences": [{"steps": [
                 {"type": "email", "variants": [{"subject": "One", "body": "<div>Hi</div>"}]},
                 {"type": "email", "variants": [{"subject": "Two",
-                                                "body": '<img src="{{Gif url}}" width="400" alt="x">'}]},
+                                                "body": '<img src="{{GifUrl}}" width="400" alt="x">'}]},
             ]}],
         }
         campaign.update(overrides)
@@ -439,21 +439,21 @@ class TestCampaignPreflight(unittest.TestCase):
         campaign = self._campaign(sequences=[{"steps": [
             {"type": "email", "variants": [{"body": "<div>no image here</div>"}]}
         ]}])
-        self.assertIn("A step references {{Gif url}}", self._fail_labels(campaign))
+        self.assertIn("A step references {{GifUrl}}", self._fail_labels(campaign))
 
     def test_image_on_step_one_is_flagged(self):
         campaign = self._campaign(sequences=[{"steps": [
-            {"type": "email", "variants": [{"body": '<img src="{{Gif url}}">'}]},
+            {"type": "email", "variants": [{"body": '<img src="{{GifUrl}}">'}]},
         ]}])
         self.assertIn("The image is not on step 1", self._fail_labels(campaign))
 
     def test_unregistered_variable_is_flagged(self):
         campaign = self._campaign(custom_variables={"jobTitle": True})
-        self.assertIn("'Gif url' is registered on the campaign", self._fail_labels(campaign))
+        self.assertIn("'GifUrl' is registered on the campaign", self._fail_labels(campaign))
 
     def test_variables_with_spaces_are_valid_instantly_names(self):
         """The live workspace already runs {{NEW A 1}} and {{SUBJECT EMAIL 1}},
-        so a space in 'Gif url' is not a problem."""
+        so a space in 'Gif small' or 'Video url' is not a problem."""
         from loomgif.instantly import MEDIA_COLUMNS
 
         self.assertTrue(any(" " in name for name in MEDIA_COLUMNS))

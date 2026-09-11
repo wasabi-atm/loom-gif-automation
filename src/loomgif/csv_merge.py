@@ -8,7 +8,7 @@ Two rules from that spec drive everything here:
 
 * Column names must start with a capital and be <= 20 characters, or Instantly
   maps them silently to nothing.
-* An empty ``Gif url`` renders a broken image icon, which is worse than no
+* An empty ``GifUrl`` renders a broken image icon, which is worse than no
   image — so prospects without media are split into their own no-GIF file.
 """
 
@@ -165,8 +165,8 @@ def merge(
         gif_path = out_dir / f"{stem}-gif.csv"
         _write(gif_path, header, with_media)
     if without_media:
-        # An empty `Gif url` renders a broken image icon, which is worse than no
-        # image. The campaign CSV carries `Gif url` as one of its own tracking
+        # An empty `GifUrl` renders a broken image icon, which is worse than no
+        # image. The campaign CSV carries `GifUrl` as one of its own tracking
         # columns, so it is not enough to skip adding ours — any media column
         # that is empty for every row here has to be dropped outright.
         nogif_columns = [

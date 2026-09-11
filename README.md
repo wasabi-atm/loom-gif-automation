@@ -78,14 +78,14 @@ loomgif merge --campaign campaign.csv --manifest output/manifest.csv
 #    -> output/campaign-nogif.csv   rows that do not
 ```
 
-**Two files, two campaigns.** An empty `Gif url` renders a broken image icon,
+**Two files, two campaigns.** An empty `GifUrl` renders a broken image icon,
 which is worse than no image, so any prospect whose screenshot failed is split
 into `-nogif.csv` and runs as a separate campaign. `merge` does that split for
 you and prints the counts.
 
 **Column names.** Instantly maps columns silently to nothing unless every name
 starts with a capital and is 20 characters or fewer. The merged columns are
-`Gif url`, `Gif small`, `Video url`, `Webm url`, `Poster url`, `Loom link`.
+`GifUrl`, `Gif small`, `Video url`, `Webm url`, `Poster url`, `Loom link`.
 `merge` validates the whole header and warns on anything that breaks the rules.
 
 **The tag goes in the sequence body, never in the CSV.** Written once, via Code
@@ -96,7 +96,7 @@ loomgif snippet
 ```
 
 ```html
-<img src="{{Gif url}}" width="600" alt="Your homepage, with a few notes from me" style="..." />
+<img src="{{GifUrl}}" width="600" alt="Your homepage, with a few notes from me" style="..." />
 ```
 
 Alt text is required, not optional: most clients block images by default, and
@@ -125,7 +125,7 @@ loomgif preflight --campaign <campaign-id>
 ```
   OK    'Send emails as text-only' is off
   OK    'Send first email as text-only' is off
-  FAIL  A step references {{Gif url}}  (no step does — the GIF will never render)
+  FAIL  A step references {{GifUrl}}  (no step does — the GIF will never render)
 ```
 
 The other two are workspace-level and still need a human; `preflight` says so
@@ -137,9 +137,10 @@ hint. **Put the GIF on step 2 or 3**, where the plain-text feel matters less —
 
 ### Variable names with spaces
 
-`{{Gif url}}` has a space in it, which looks wrong but is not: the live
-workspace already runs `{{NEW A 1}}` and `{{SUBJECT EMAIL 1}}` in sent
-campaigns. The capital-first, 20-character rules are what actually matter.
+`{{GifUrl}}` has no space, but its siblings — `{{Gif small}}`, `{{Video url}}` —
+still do, and that looks wrong without being wrong: the live workspace already
+runs `{{NEW A 1}}` and `{{SUBJECT EMAIL 1}}` in sent campaigns. The
+capital-first, 20-character rules are what actually matter, not the spaces.
 
 ### Optional: push straight to the leads
 

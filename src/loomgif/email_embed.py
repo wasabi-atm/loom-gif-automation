@@ -3,7 +3,7 @@
 Produces two things:
 
 * ``snippet`` — the exact tag to paste into the Instantly sequence body via
-  Code View. It references ``{{Gif url}}``, so it is written once for the whole
+  Code View. It references ``{{GifUrl}}``, so it is written once for the whole
   campaign rather than per prospect.
 * ``preview`` — a standalone HTML file for eyeballing the result locally.
 """
@@ -51,7 +51,7 @@ def snippet(
 ) -> str:
     """Render the sequence-body tag.
 
-    Defaults to the campaign-wide form using the ``{{Gif url}}`` variable. Pass a
+    Defaults to the campaign-wide form using the ``{{GifUrl}}`` variable. Pass a
     literal URL only when building a one-off email outside Instantly.
     """
     if not alt or not alt.strip():

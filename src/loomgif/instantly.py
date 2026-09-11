@@ -24,8 +24,8 @@ log = logging.getLogger(__name__)
 # Column / variable names, dictated by references/instantly-csv.md in the
 # mta-instantly-campaign skill: every name starts with a capital letter and is
 # 20 characters or fewer, or Instantly's mapping fails silently at upload.
-# `Gif url` is the canonical one — the sequence body uses {{Gif url}}.
-VAR_GIF = "Gif url"
+# `GifUrl` is the canonical one — the sequence body uses {{GifUrl}}.
+VAR_GIF = "GifUrl"
 VAR_GIF_SMALL = "Gif small"
 VAR_VIDEO = "Video url"
 VAR_VIDEO_WEBM = "Webm url"

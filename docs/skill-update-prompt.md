@@ -37,16 +37,16 @@ loomgif merge --campaign <campaign.csv> --manifest output/manifest.csv
 `merge` outputs `<name>-gif.csv` and `<name>-nogif.csv`. It performs the
 GIF/no-GIF split this spec already requires, so the skill should hand that job
 to it rather than managing it by hand. Note that `merge` drops any media column
-that is empty across every no-GIF row — including this spec's own `Gif url`
+that is empty across every no-GIF row — including this spec's own `GifUrl`
 tracking column, which would otherwise carry through empty and render the broken
 image icon the spec warns about.
 
-**The columns it writes.** `Gif url` plus `Gif small`, `Video url`, `Webm url`,
+**The columns it writes.** `GifUrl` plus `Gif small`, `Video url`, `Webm url`,
 `Poster url`, `Loom link`. All capital-first and 20 characters or fewer, per the
 existing rules. Only columns with values are written, so a run that hosts just
 the GIF adds one column, not six.
 
-**The tag is unchanged.** The `<img src="{{Gif url}}" width="600" ...>` example
+**The tag is unchanged.** The `<img src="{{GifUrl}}" width="600" ...>` example
 already in the spec is still correct — `loomgif snippet` prints exactly that,
 and the render width and tag width are kept in sync in code.
 

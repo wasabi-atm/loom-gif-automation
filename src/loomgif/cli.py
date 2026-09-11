@@ -191,7 +191,7 @@ def cmd_merge(args: argparse.Namespace) -> int:
     if report.nogif_path:
         print(
             "\nThe no-GIF file must run as a separate campaign — an empty "
-            "'Gif url' renders a broken image icon."
+            "'GifUrl' renders a broken image icon."
         )
     return 0
 
