@@ -45,6 +45,24 @@ _CONSENT_SELECTORS = [
     "button:has-text('I agree')",
     "button:has-text('Got it')",
     "[data-testid='uc-accept-all-button']",
+    # The list this feeds is an EU/UK one, so the consent wall is as often in
+    # the local language as in English. `has-text` matches substrings
+    # case-insensitively, so one entry covers "Akzeptieren" and "Alle
+    # akzeptieren" alike. Accept-all variants come first: a reject button would
+    # also clear the banner, but some sites reload the page to apply it.
+    "button:has-text('Alle akzeptieren')",
+    "button:has-text('Zustimmen')",
+    "button:has-text('Akzeptieren')",
+    "button:has-text('Einverstanden')",
+    "button:has-text('Tout accepter')",
+    "button:has-text('Accepter')",
+    "button:has-text('Aceptar todo')",
+    "button:has-text('Aceptar')",
+    "button:has-text('Alles accepteren')",
+    "button:has-text('Accepteren')",
+    "button:has-text('Akkoord')",
+    "button:has-text('Accetta tutto')",
+    "button:has-text('Accetta')",
 ]
 
 _STRIP_OVERLAYS_JS = """
