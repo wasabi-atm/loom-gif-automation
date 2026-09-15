@@ -152,16 +152,21 @@ def capture(
     full_page: bool = True,
     wait_extra_ms: int = 1_200,
     attempts: int = 3,
+    settle_ms: int = 1_500,
 ) -> "Capture":
     """Screenshot `url` to `dest`. Raises if every attempt fails.
 
     Headless Chromium occasionally dies outright on heavy pages, which would
-    otherwise cost a whole batch, so each capture gets a few goes.
+    otherwise cost a whole batch, so each capture gets a few goes. Sites that
+    hydrate or animate after load also tear down the execution context under
+    the first evaluate, so the settle window widens with every attempt.
     """
     last: Optional[Exception] = None
     for attempt in range(1, attempts + 1):
         try:
-            return _capture_once(url, dest, cfg, timeout_ms, full_page, wait_extra_ms)
+            return _capture_once(
+                url, dest, cfg, timeout_ms, full_page, wait_extra_ms, settle_ms * attempt
+            )
         except Exception as exc:  # noqa: BLE001
             last = exc
             log.warning("Capture attempt %d/%d failed for %s: %s", attempt, attempts, url, exc)
@@ -176,6 +181,7 @@ def _capture_once(
     timeout_ms: int,
     full_page: bool,
     wait_extra_ms: int,
+    settle_ms: int,
 ) -> "Capture":
     from playwright.sync_api import TimeoutError as PWTimeout  # noqa: WPS433
     from playwright.sync_api import sync_playwright
@@ -202,12 +208,18 @@ def _capture_once(
             except PWTimeout:
                 log.debug("networkidle never settled for %s — continuing", url)
 
+            # Nothing above proves the page has stopped moving: a site that
+            # hydrates or runs entry animations after load keeps swapping the
+            # document out from under the first evaluate, which kills the
+            # execution context. Stand still first.
+            page.wait_for_timeout(settle_ms)
+
             _dismiss_consent(page)
-            page.evaluate(_LAZY_LOAD_JS)
+            _evaluate_settled(page, _LAZY_LOAD_JS, settle_ms)
 
             navbar, navbar_height = _lift_navbar(page, dest, cfg)
 
-            page.evaluate(_STRIP_OVERLAYS_JS)
+            _evaluate_settled(page, _STRIP_OVERLAYS_JS, settle_ms)
             page.wait_for_timeout(wait_extra_ms)
 
             _shoot(page, dest, cfg, full_page)
@@ -218,6 +230,29 @@ def _capture_once(
                     closeable.close()
                 except Exception:  # noqa: BLE001 — the browser may already be gone
                     pass
+
+
+def _evaluate_settled(page, script, settle_ms: int, attempts: int = 3):
+    """Run `script`, surviving a navigation that lands mid-evaluate.
+
+    Consent scripts and geo redirects routinely re-navigate a page moments
+    after load, which tears down the execution context and kills whatever was
+    running in it. The page that comes back is the one we actually want, so
+    wait for it to settle and run the script again rather than failing.
+    """
+    for attempt in range(1, attempts + 1):
+        try:
+            return page.evaluate(script)
+        except Exception as exc:  # noqa: BLE001
+            destroyed = "Execution context was destroyed" in str(exc)
+            if not destroyed or attempt == attempts:
+                raise
+            log.debug("Navigation during evaluate (attempt %d) — settling and retrying", attempt)
+            try:
+                page.wait_for_load_state("domcontentloaded", timeout=15_000)
+            except Exception:  # noqa: BLE001 — the settle below is the real guard
+                pass
+            page.wait_for_timeout(settle_ms * attempt)
 
 
 def _dismiss_consent(page, per_selector_timeout: int = 900) -> None:
